@@ -37,10 +37,122 @@ button {
   min-height: 100vh;
 }
 
+.login-shell,
 .page-shell {
   max-width: 1440px;
   margin: 0 auto;
   padding: 32px 24px 64px;
+}
+
+.login-shell {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+}
+
+.login-panel {
+  width: min(1120px, 100%);
+  display: grid;
+  grid-template-columns: 1.1fr 0.9fr;
+  gap: 24px;
+  padding: 28px;
+  border-radius: 36px;
+  background: linear-gradient(135deg, rgba(16, 53, 89, 0.96), rgba(24, 98, 138, 0.88));
+  box-shadow: 0 24px 60px rgba(13, 45, 75, 0.22);
+  color: #f7fbff;
+}
+
+.login-copy {
+  padding: 18px;
+}
+
+.login-copy h1 {
+  margin: 0 0 14px;
+  font-size: clamp(2.4rem, 5vw, 4rem);
+  line-height: 1.08;
+}
+
+.login-copy p {
+  margin: 0;
+  max-width: 44rem;
+  color: rgba(247, 251, 255, 0.88);
+}
+
+.login-tips,
+.login-cards {
+  display: grid;
+  gap: 14px;
+}
+
+.login-tips {
+  margin-top: 28px;
+}
+
+.login-tips span {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(247, 251, 255, 0.9);
+  font-size: 14px;
+}
+
+.login-cards {
+  grid-template-columns: 1fr;
+}
+
+.login-card {
+  border: 0;
+  padding: 22px;
+  text-align: left;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.95);
+  color: #132238;
+  box-shadow: 0 16px 36px rgba(13, 45, 75, 0.08);
+}
+
+.login-card strong,
+.current-account-card strong {
+  display: block;
+  margin: 8px 0 6px;
+  font-size: 1.3rem;
+}
+
+.login-card span,
+.current-account-card span {
+  color: #82642f;
+  font-size: 14px;
+}
+
+.login-card p,
+.current-account-card p {
+  margin: 0 0 10px;
+  color: #4c6073;
+}
+
+.login-card small,
+.current-account-card small {
+  color: #6c7d8d;
+}
+
+.owner-mobile-shell {
+  max-width: 430px;
+  min-height: 100vh;
+  padding: 18px 14px 28px;
+  position: relative;
+}
+
+.owner-mobile-shell::before {
+  content: '';
+  position: fixed;
+  inset: 10px;
+  border-radius: 38px;
+  border: 1px solid rgba(19, 34, 56, 0.08);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.3), rgba(255, 255, 255, 0.08));
+  box-shadow: 0 24px 50px rgba(13, 45, 75, 0.16);
+  pointer-events: none;
 }
 
 .hero {
@@ -92,9 +204,18 @@ button {
   color: #f7fbff;
 }
 
+.pill:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .pill.active {
   background: #ffcf6e;
   color: #16293c;
+}
+
+.logout-pill {
+  background: rgba(255, 255, 255, 0.2);
 }
 
 .hero-panel {
@@ -391,7 +512,104 @@ select {
   color: #24405c;
 }
 
+.owner-mobile-shell .hero {
+  grid-template-columns: 1fr;
+  gap: 16px;
+  padding: 22px 18px;
+  border-radius: 30px;
+  position: relative;
+  overflow: hidden;
+}
+
+.owner-mobile-shell .hero::after {
+  content: '';
+  width: 108px;
+  height: 28px;
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: rgba(8, 18, 31, 0.28);
+}
+
+.owner-mobile-shell .hero-copy {
+  padding-top: 26px;
+}
+
+.owner-mobile-shell .hero h1 {
+  font-size: clamp(2rem, 10vw, 2.8rem);
+}
+
+.owner-mobile-shell .hero p {
+  font-size: 14px;
+}
+
+.owner-mobile-shell .hero-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.owner-mobile-shell .pill {
+  width: 100%;
+  padding: 12px 10px;
+  font-size: 13px;
+}
+
+.owner-mobile-shell .hero-panel,
+.owner-mobile-grid,
+.owner-mobile-shell .dual-grid,
+.owner-mobile-shell .vehicle-grid,
+.owner-mobile-shell .account-cards,
+.owner-mobile-shell .docs-grid,
+.owner-mobile-shell .compact-form,
+.owner-mobile-shell .account-form {
+  grid-template-columns: 1fr;
+}
+
+.owner-mobile-shell .section {
+  margin-top: 18px;
+}
+
+.owner-mobile-shell .panel,
+.owner-mobile-shell .status-card {
+  border-radius: 22px;
+}
+
+.owner-mobile-shell .panel {
+  padding: 18px;
+}
+
+.owner-mobile-shell .panel-header,
+.owner-mobile-shell .notice-title,
+.owner-mobile-shell .active-card {
+  align-items: flex-start;
+  flex-direction: column;
+}
+
+.owner-mobile-shell .panel-header span {
+  text-align: left;
+}
+
+.owner-mobile-shell .table-wrap {
+  margin: 0 -4px;
+}
+
+.owner-mobile-shell .compact-form button,
+.owner-mobile-shell .ghost-button {
+  width: 100%;
+}
+
+.owner-mobile-shell .active-card {
+  gap: 12px;
+}
+
+.owner-mobile-shell .owner-mobile-panel {
+  margin-top: 18px;
+}
+
 @media (max-width: 1120px) {
+  .login-panel,
   .hero,
   .dual-grid,
   .team-grid,
@@ -408,10 +626,12 @@ select {
 }
 
 @media (max-width: 720px) {
+  .login-shell,
   .page-shell {
     padding: 18px 14px 48px;
   }
 
+  .login-panel,
   .hero {
     padding: 24px;
   }

@@ -3,14 +3,19 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { api } from './services/api'
 import type { AppDataset, ParkingLotPayload, User, VehiclePayload } from './types'
 
-const views = ['dashboard', 'admin', 'user', 'docs'] as const
+const viewConfig = {
+  dashboard: '数据看板',
+  admin: '管理端',
+  user: '用户端',
+} as const
+
+const views = Object.keys(viewConfig) as Array<keyof typeof viewConfig>
 
 const dataset = ref<AppDataset | null>(null)
 const loading = ref(true)
 const banner = ref('正在加载城市停车资源管理系统演示数据...')
-const selectedView = ref<'dashboard' | 'admin' | 'user' | 'docs'>('dashboard')
-const currentAccount = ref('admin')
-const loginState = reactive({ username: 'admin', password: '123456' })
+const selectedView = ref<'dashboard' | 'admin' | 'user'>('dashboard')
+const currentAccount = ref('')
 
 const parkingLotForm = reactive<ParkingLotPayload>({
   name: '',
@@ -37,6 +42,24 @@ const ownerUsers = computed(() => dataset.value?.users.filter((item) => item.rol
 const currentUser = computed<User | undefined>(() =>
   dataset.value?.users.find((item) => item.username === currentAccount.value),
 )
+const loggedIn = computed(() => Boolean(currentUser.value))
+const isOwnerMobileView = computed(() => currentUser.value?.role === '车主')
+const availableViews = computed(() => {
+  if (!currentUser.value) {
+    return [] as (typeof views)
+  }
+
+  if (currentUser.value.role === '车主') {
+    return ['user'] as (typeof views)
+  }
+
+  if (currentUser.value.role === '停车场管理员') {
+    return ['admin'] as (typeof views)
+  }
+
+  return views
+})
+const showViewTabs = computed(() => availableViews.value.length > 1)
 
 async function refresh() {
   dataset.value = await api.getDataset()
@@ -49,14 +72,21 @@ async function loadPage() {
   loading.value = false
 }
 
-async function doLogin() {
-  try {
-    const result = await api.login(loginState)
-    currentAccount.value = result.user.username
-    banner.value = `当前演示身份已切换为：${result.user.realName}（${result.user.role}）`
-  } catch (error) {
-    banner.value = error instanceof Error ? error.message : '登录失败'
+function quickLogin(username: string) {
+  const user = dataset.value?.users.find((item) => item.username === username)
+  if (!user) {
+    banner.value = '未找到演示账号'
+    return
   }
+  currentAccount.value = user.username
+  selectedView.value = user.role === '车主' ? 'user' : user.role === '停车场管理员' ? 'admin' : 'dashboard'
+  banner.value = `当前演示身份已切换为：${user.realName}（${user.role}）`
+}
+
+function logout() {
+  currentAccount.value = ''
+  selectedView.value = 'dashboard'
+  banner.value = '已退出登录，请重新选择演示身份。'
 }
 
 async function addParkingLot() {
@@ -122,33 +152,61 @@ onMounted(loadPage)
 </script>
 
 <template>
-  <div class="page-shell" v-if="dataset">
+  <div v-if="dataset && !loggedIn" class="login-shell">
+    <section class="login-panel">
+      <div class="login-copy">
+        <span class="eyebrow">City Parking Resource Management</span>
+        <h1>城市停车资源管理系统</h1>
+        <p>
+          请选择要进入的演示身份。系统会根据身份自动切换为桌面端管理界面或车主移动端，无需连接数据库校验密码。
+        </p>
+        <div class="login-tips">
+          <span>管理员：进入数据看板与综合管理</span>
+          <span>停车场管理员：直接进入资源管理页面</span>
+          <span>车主：直接进入移动端车主页面</span>
+        </div>
+      </div>
+      <div class="login-cards">
+        <button
+          v-for="user in dataset.users"
+          :key="user.id"
+          class="login-card"
+          @click="quickLogin(user.username)"
+        >
+          <span>{{ user.role }}</span>
+          <strong>{{ user.realName }}</strong>
+          <p>{{ user.responsibility }}</p>
+          <small>点击进入 {{ user.role === '车主' ? '移动端' : '工作台' }}</small>
+        </button>
+      </div>
+    </section>
+  </div>
+
+  <div v-else-if="dataset" class="page-shell" :class="{ 'owner-mobile-shell': isOwnerMobileView }">
     <header class="hero">
       <div class="hero-copy">
-        <span class="eyebrow">Graduation Project 2026</span>
-        <h1>{{ dataset.projectInfo.projectName }}</h1>
+        <span class="eyebrow">{{ isOwnerMobileView ? 'Owner Mobile Mode' : 'Graduation Project 2026' }}</span>
+        <h1>{{ isOwnerMobileView ? '车主移动端' : dataset.projectInfo.projectName }}</h1>
         <p>
-          围绕“城市停车资源管理”完成停车资源维护、车辆进出场、订单结算、可视化看板、调度建议与材料整理，
-          适合作为毕设演示与文档交付的一体化作品。
+          {{
+            isOwnerMobileView
+              ? '为车主提供停车场查询、车辆管理、快速入场、费用结算与在场记录查看，登录后自动切换为手机端展示效果。'
+              : '围绕“城市停车资源管理”完成停车资源维护、车辆进出场、订单结算、可视化看板、调度建议与材料整理，适合作为毕设演示与文档交付的一体化作品。'
+          }}
         </p>
         <div class="hero-actions">
-          <button
-            v-for="view in views"
-            :key="view"
-            class="pill"
-            :class="{ active: selectedView === view }"
-            @click="setView(view)"
-          >
-            {{
-              view === 'dashboard'
-                ? '数据看板'
-                : view === 'admin'
-                  ? '管理端'
-                  : view === 'user'
-                    ? '用户端'
-                    : '交付材料'
-            }}
-          </button>
+          <template v-if="showViewTabs">
+            <button
+              v-for="view in availableViews"
+              :key="view"
+              class="pill"
+              :class="{ active: selectedView === view }"
+              @click="setView(view)"
+            >
+              {{ viewConfig[view] }}
+            </button>
+          </template>
+          <button class="pill logout-pill" @click="logout">退出登录</button>
         </div>
       </div>
       <aside class="hero-panel">
@@ -169,15 +227,7 @@ onMounted(loadPage)
       </aside>
     </header>
 
-    <section class="section team-grid">
-      <article v-for="member in dataset.projectInfo.team" :key="member.name" class="team-card">
-        <span>{{ member.role }}</span>
-        <h3>{{ member.name }}</h3>
-        <p>{{ member.responsibility }}</p>
-      </article>
-    </section>
-
-    <section v-if="selectedView === 'dashboard'" class="section">
+    <section v-if="selectedView === 'dashboard' && !isOwnerMobileView" class="section">
       <div class="card-grid metrics">
         <article v-for="metric in dataset.overview.metrics" :key="metric.title" class="metric-card">
           <span>{{ metric.title }}</span>
@@ -225,7 +275,7 @@ onMounted(loadPage)
       </div>
     </section>
 
-    <section v-if="selectedView === 'admin'" class="section">
+    <section v-if="selectedView === 'admin' && !isOwnerMobileView" class="section">
       <div class="dual-grid">
         <article class="panel">
           <div class="panel-header">
@@ -348,22 +398,18 @@ onMounted(loadPage)
     </section>
 
     <section v-if="selectedView === 'user'" class="section">
-      <div class="dual-grid">
+      <div class="dual-grid" :class="{ 'owner-mobile-grid': isOwnerMobileView }">
         <article class="panel">
           <div class="panel-header">
-            <h2>演示账号切换</h2>
-            <span>用于展示管理员、停车场管理员、车主三种角色</span>
+            <h2>当前登录身份</h2>
+            <span>进入系统后自动跳转到对应角色界面</span>
           </div>
-          <form class="compact-form account-form" @submit.prevent="doLogin">
-            <input v-model="loginState.username" placeholder="用户名：admin / manager / owner" />
-            <input v-model="loginState.password" type="password" placeholder="密码：123456" />
-            <button type="submit">切换身份</button>
-          </form>
           <div class="account-cards">
-            <div v-for="user in dataset.users" :key="user.id" class="account-card">
-              <strong>{{ user.realName }}</strong>
-              <span>{{ user.role }}</span>
-              <p>{{ user.responsibility }}</p>
+            <div class="account-card current-account-card">
+              <strong>{{ currentUser?.realName }}</strong>
+              <span>{{ currentUser?.role }}</span>
+              <p>{{ currentUser?.responsibility }}</p>
+              <small>如需切换角色，请先退出登录回到首页选择身份。</small>
             </div>
           </div>
         </article>
@@ -409,7 +455,7 @@ onMounted(loadPage)
         </article>
       </div>
 
-      <article class="panel">
+      <article class="panel" :class="{ 'owner-mobile-panel': isOwnerMobileView }">
         <div class="panel-header">
           <h2>当前在场车辆</h2>
           <span>用于演示进场后记录生成、出场后结算完成</span>
@@ -426,25 +472,6 @@ onMounted(loadPage)
       </article>
     </section>
 
-    <section v-if="selectedView === 'docs'" class="section">
-      <div class="card-grid docs-grid">
-        <article class="doc-card">
-          <span>团队提交物</span>
-          <h3>代码、技术文档、计划书、演示素材</h3>
-          <p>仓库内已提供后端、前端、SQL、README、技术文档、计划书和个人材料模板。</p>
-        </article>
-        <article class="doc-card">
-          <span>个人材料</span>
-          <h3>毕业实习报告册 + 学习日志 Excel</h3>
-          <p>报告册采用毕设常见结构，学习日志已生成可继续补充的 Excel 工作簿。</p>
-        </article>
-        <article class="doc-card">
-          <span>UML / 数据库</span>
-          <h3>Mermaid 图与表结构说明</h3>
-          <p>技术文档内补齐用例图、类图、时序图、业务流程图、E-R 图和数据库表设计。</p>
-        </article>
-      </div>
-    </section>
   </div>
 
   <div v-else class="loading-state">
