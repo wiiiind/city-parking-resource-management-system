@@ -37,11 +37,27 @@ const checkInForm = reactive({
   parkingLotId: 1,
 })
 
-const activeRecords = computed(() => dataset.value?.records.filter((item) => item.status === '在场') ?? [])
 const ownerUsers = computed(() => dataset.value?.users.filter((item) => item.role === '车主') ?? [])
 const currentUser = computed<User | undefined>(() =>
   dataset.value?.users.find((item) => item.username === currentAccount.value),
 )
+const ownerVehicles = computed(() =>
+  dataset.value?.vehicles.filter((item) => item.userId === currentUser.value?.id) ?? [],
+)
+const ownerRecords = computed(() =>
+  dataset.value?.records.filter((item) => item.ownerName === currentUser.value?.realName) ?? [],
+)
+const ownerOrders = computed(() =>
+  dataset.value?.orders.filter((item) => item.plateNumber && ownerVehicles.value.some((vehicle) => vehicle.plateNumber === item.plateNumber)) ?? [],
+)
+const lotPricingMap = computed(() => {
+  const entries: Array<[number, string]> =
+    dataset.value?.pricingRules.map((rule) => [
+      rule.parkingLotId,
+      `首${rule.baseMinutes}分钟${rule.baseFee}元，之后${rule.hourlyFee}元/小时，封顶${rule.dailyCap}元`,
+    ]) ?? []
+  return new Map(entries)
+})
 const loggedIn = computed(() => Boolean(currentUser.value))
 const isOwnerMobileView = computed(() => currentUser.value?.role === '车主')
 const availableViews = computed(() => {
@@ -111,7 +127,7 @@ async function addVehicle() {
     await api.createVehicle(vehicleForm)
     await refresh()
     Object.assign(vehicleForm, {
-      userId: 3,
+      userId: currentUser.value?.id ?? 3,
       plateNumber: '',
       brand: '',
       color: '',
@@ -190,7 +206,7 @@ onMounted(loadPage)
         <p>
           {{
             isOwnerMobileView
-              ? '为车主提供停车场查询、车辆管理、快速入场、费用结算与在场记录查看，登录后自动切换为手机端展示效果。'
+              ? '为车主提供停车场查询、车辆绑定、停车记录查看与停车费用缴纳，页面按移动端答辩展示方式布局。'
               : '围绕“城市停车资源管理”完成停车资源维护、车辆进出场、订单结算、可视化看板、调度建议与材料整理，适合作为毕设演示与文档交付的一体化作品。'
           }}
         </p>
@@ -416,8 +432,26 @@ onMounted(loadPage)
 
         <article class="panel">
           <div class="panel-header">
-            <h2>车辆档案与停车业务</h2>
-            <span>车主端核心操作区</span>
+            <h2>查找停车场</h2>
+            <span>突出车主查询与选择能力</span>
+          </div>
+          <div class="notice-list">
+            <div v-for="lot in dataset.parkingLots" :key="lot.id" class="notice-card">
+              <div class="notice-title">
+                <strong>{{ lot.name }}</strong>
+                <span class="badge success">空闲 {{ lot.freeSpaces }} / {{ lot.totalSpaces }}</span>
+              </div>
+              <p>{{ lot.address }}</p>
+              <p>营业时间：{{ lot.businessHours }}</p>
+              <p>{{ lotPricingMap.get(lot.id) ?? '按停车场规则计费' }}</p>
+            </div>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-header">
+            <h2>绑定车辆与发起停车</h2>
+            <span>保留车主端必要操作</span>
           </div>
           <form class="compact-form" @submit.prevent="addVehicle">
             <select v-model.number="vehicleForm.userId">
@@ -433,7 +467,7 @@ onMounted(loadPage)
 
           <form class="compact-form" @submit.prevent="checkInVehicle">
             <select v-model.number="checkInForm.vehicleId">
-              <option v-for="vehicle in dataset.vehicles" :key="vehicle.id" :value="vehicle.id">
+              <option v-for="vehicle in ownerVehicles" :key="vehicle.id" :value="vehicle.id">
                 {{ vehicle.plateNumber }} / {{ vehicle.ownerName }}
               </option>
             </select>
@@ -446,7 +480,7 @@ onMounted(loadPage)
           </form>
 
           <div class="vehicle-grid">
-            <div v-for="vehicle in dataset.vehicles" :key="vehicle.id" class="vehicle-card">
+            <div v-for="vehicle in ownerVehicles" :key="vehicle.id" class="vehicle-card">
               <strong>{{ vehicle.plateNumber }}</strong>
               <span>{{ vehicle.brand }} / {{ vehicle.color }}</span>
               <p>{{ vehicle.ownerName }}</p>
@@ -455,21 +489,44 @@ onMounted(loadPage)
         </article>
       </div>
 
-      <article class="panel" :class="{ 'owner-mobile-panel': isOwnerMobileView }">
-        <div class="panel-header">
-          <h2>当前在场车辆</h2>
-          <span>用于演示进场后记录生成、出场后结算完成</span>
-        </div>
-        <div class="active-records">
-          <div v-for="record in activeRecords" :key="record.id" class="active-card">
-            <div>
-              <strong>{{ record.plateNumber }}</strong>
-              <span>{{ record.parkingLotName }} / {{ record.spaceCode }}</span>
-            </div>
-            <button class="ghost-button" @click="checkOutVehicle(record.id)">立即出场结算</button>
+      <div class="dual-grid" :class="{ 'owner-mobile-grid': isOwnerMobileView }">
+        <article class="panel" :class="{ 'owner-mobile-panel': isOwnerMobileView }">
+          <div class="panel-header">
+            <h2>我的停车记录</h2>
+            <span>突出查询与缴费闭环</span>
           </div>
-        </div>
-      </article>
+          <div class="active-records">
+            <div v-for="record in ownerRecords" :key="record.id" class="active-card">
+              <div>
+                <strong>{{ record.plateNumber }} / {{ record.parkingLotName }}</strong>
+                <span>入场时间：{{ record.entryTime }}</span>
+                <span v-if="record.status === '已完成'">已缴费用：{{ record.amount }} 元</span>
+                <span v-else>当前状态：在场，待出场结算</span>
+              </div>
+              <button v-if="record.status === '在场'" class="ghost-button" @click="checkOutVehicle(record.id)">支付停车费用</button>
+              <span v-else class="badge success">已完成</span>
+            </div>
+          </div>
+        </article>
+
+        <article class="panel" :class="{ 'owner-mobile-panel': isOwnerMobileView }">
+          <div class="panel-header">
+            <h2>我的缴费订单</h2>
+            <span>展示费用结算结果</span>
+          </div>
+          <div class="notice-list">
+            <div v-for="order in ownerOrders" :key="order.id" class="notice-card">
+              <div class="notice-title">
+                <strong>{{ order.plateNumber }}</strong>
+                <span class="badge success">{{ order.paymentStatus }}</span>
+              </div>
+              <p>{{ order.parkingLotName }}</p>
+              <p>支付金额：{{ order.amount }} 元</p>
+              <p>支付时间：{{ order.createdAt }}</p>
+            </div>
+          </div>
+        </article>
+      </div>
     </section>
 
   </div>
