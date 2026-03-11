@@ -186,7 +186,7 @@ export function createDemoDataset(): AppDataset {
       {
         id: 1,
         title: '演示账号说明',
-        content: '管理员：admin / 123456；停车场管理员：manager / 123456；车主：owner / 123456',
+        content: '车主登录账号：owner / 123456；管理员通过首页“进入后台管理”按钮进入。',
         level: '重要',
       },
       {
