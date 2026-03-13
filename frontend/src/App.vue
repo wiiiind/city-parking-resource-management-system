@@ -32,11 +32,6 @@ const vehicleForm = reactive<VehiclePayload>({
   color: '',
 })
 
-const checkInForm = reactive({
-  vehicleId: 1,
-  parkingLotId: 1,
-})
-
 const ownerNav = [
   { key: 'query', label: '停车查询' },
   { key: 'vehicles', label: '车辆管理' },
@@ -65,6 +60,11 @@ const ownerRecords = computed(() =>
 const ownerOrders = computed(() =>
   dataset.value?.orders.filter((item) => ownerVehicles.value.some((vehicle) => vehicle.plateNumber === item.plateNumber)) ?? [],
 )
+const orderRecordMap = computed(() => {
+  const entries: Array<[number, string | null]> =
+    dataset.value?.records.map((record) => [record.id, record.exitTime]) ?? []
+  return new Map(entries)
+})
 const selectedLot = computed(() => dataset.value?.parkingLots.find((item) => item.id === selectedLotId.value))
 const lotPricingMap = computed(() => {
   const entries: Array<[number, string]> =
@@ -135,8 +135,6 @@ const lotDashboardMetrics = computed(() => {
     { title: '累计收入', value: `${income.toFixed(2)} 元`, description: '当前停车场订单累计' },
   ]
 })
-const usageRate = computed(() => dataset.value?.overview.occupancyRate ?? '0%')
-
 async function refresh() {
   dataset.value = await api.getDataset()
   const lots = dataset.value?.parkingLots ?? []
@@ -219,17 +217,6 @@ async function addVehicle() {
   }
 }
 
-async function checkInVehicle() {
-  try {
-    await api.checkIn(checkInForm.vehicleId, checkInForm.parkingLotId)
-    await refresh()
-    ownerTab.value = 'records'
-    banner.value = '已生成停车记录，可在停车记录页查看。'
-  } catch (error) {
-    banner.value = error instanceof Error ? error.message : '车辆入场失败'
-  }
-}
-
 async function checkOutVehicle(recordId: number) {
   try {
     await api.checkOut(recordId)
@@ -251,10 +238,14 @@ onMounted(loadPage)
         <span class="eyebrow">City Parking Resource Management</span>
         <h1>城市停车资源管理系统</h1>
         <p>系统以车主使用为主，支持停车查询、车辆绑定、停车记录查看和订单查询；管理员可通过单独入口进入后台查看经营数据。</p>
-        <div class="login-tips">
-          <span>车主主入口：账号密码登录</span>
-          <span>管理员入口：单独按钮进入后台</span>
-          <span>默认演示账号：`owner / 123456`</span>
+        <div class="brand-mark">
+          <div class="brand-icon">
+            <span>P</span>
+          </div>
+          <div>
+            <strong>City Parking</strong>
+            <p>统一停车查询、订单查看与经营分析入口</p>
+          </div>
         </div>
       </div>
 
@@ -273,7 +264,7 @@ onMounted(loadPage)
         <button class="login-card admin-entry-card" @click="enterAdminPortal">
           <span>系统管理员</span>
           <strong>进入后台管理</strong>
-          <p>单独进入管理员板块，查看收入统计、停车记录订单记录和单停车场数据看板。</p>
+          <p>查看收入统计、停车记录订单记录和单停车场数据看板。</p>
           <small>点击进入管理后台</small>
         </button>
       </div>
@@ -324,15 +315,6 @@ onMounted(loadPage)
           <strong>{{ currentUser?.realName }}</strong>
           <span>{{ currentUser?.role }}</span>
         </div>
-        <div class="status-card">
-          <p class="status-label">总体车位占用率</p>
-          <strong>{{ usageRate }}</strong>
-          <span>实时联动停车记录与经营统计</span>
-        </div>
-        <div class="status-card banner-card">
-          <p class="status-label">系统提示</p>
-          <span>{{ banner }}</span>
-        </div>
       </aside>
     </header>
 
@@ -353,19 +335,6 @@ onMounted(loadPage)
             <p>{{ lotPricingMap.get(lot.id) ?? '按停车场规则计费' }}</p>
           </div>
         </div>
-        <form class="compact-form owner-checkin-form" @submit.prevent="checkInVehicle">
-          <select v-model.number="checkInForm.vehicleId">
-            <option v-for="vehicle in ownerVehicles" :key="vehicle.id" :value="vehicle.id">
-              {{ vehicle.plateNumber }} / {{ vehicle.brand }}
-            </option>
-          </select>
-          <select v-model.number="checkInForm.parkingLotId">
-            <option v-for="lot in dataset.parkingLots" :key="lot.id" :value="lot.id">
-              {{ lot.name }} / 空闲 {{ lot.freeSpaces }}
-            </option>
-          </select>
-          <button type="submit">发起停车</button>
-        </form>
       </article>
 
       <article v-if="ownerTab === 'vehicles'" class="panel owner-mobile-panel">
@@ -426,6 +395,7 @@ onMounted(loadPage)
             </div>
             <p>{{ order.parkingLotName }}</p>
             <p>支付金额：{{ order.amount }} 元</p>
+            <p>出场时间：{{ orderRecordMap.get(order.recordId) ?? '待出场' }}</p>
             <p>支付时间：{{ order.createdAt }}</p>
           </div>
         </div>
@@ -501,6 +471,7 @@ onMounted(loadPage)
                   <th>车牌</th>
                   <th>停车场</th>
                   <th>支付金额</th>
+                  <th>出场时间</th>
                   <th>状态</th>
                   <th>支付时间</th>
                 </tr>
@@ -510,6 +481,7 @@ onMounted(loadPage)
                   <td>{{ order.plateNumber }}</td>
                   <td>{{ order.parkingLotName }}</td>
                   <td>{{ order.amount }} 元</td>
+                  <td>{{ orderRecordMap.get(order.recordId) ?? '待出场' }}</td>
                   <td><span class="badge success">{{ order.paymentStatus }}</span></td>
                   <td>{{ order.createdAt }}</td>
                 </tr>
