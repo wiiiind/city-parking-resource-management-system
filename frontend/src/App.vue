@@ -1,19 +1,26 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { api } from './services/api'
-import type { AppDataset, LoginPayload, ParkingLotPayload, User, VehiclePayload } from './types'
+import type { AppDataset, LoginPayload, Order, ParkingLotPayload, User, VehiclePayload } from './types'
 
 const dataset = ref<AppDataset | null>(null)
 const loading = ref(true)
 const banner = ref('正在加载城市停车资源管理系统演示数据...')
 const currentAccount = ref('')
+const adminLoginMode = ref(false)
 const ownerTab = ref<'query' | 'vehicles' | 'records' | 'orders'>('query')
 const adminTab = ref<'income' | 'records' | 'dashboard'>('income')
 const lotCategoryFilter = ref<'全部' | '新能源' | '普通'>('全部')
 const selectedLotId = ref(1)
+const adminRecordKeyword = ref('')
 
 const loginForm = reactive<LoginPayload>({
   username: 'owner',
+  password: '123456',
+})
+
+const adminLoginForm = reactive<LoginPayload>({
+  username: 'admin',
   password: '123456',
 })
 
@@ -63,6 +70,10 @@ const ownerOrders = computed(() =>
 const orderRecordMap = computed(() => {
   const entries: Array<[number, string | null]> =
     dataset.value?.records.map((record) => [record.id, record.exitTime]) ?? []
+  return new Map(entries)
+})
+const orderMap = computed(() => {
+  const entries: Array<[number, Order]> = dataset.value?.orders.map((order) => [order.recordId, order]) ?? []
   return new Map(entries)
 })
 const selectedLot = computed(() => dataset.value?.parkingLots.find((item) => item.id === selectedLotId.value))
@@ -135,6 +146,19 @@ const lotDashboardMetrics = computed(() => {
     { title: '累计收入', value: `${income.toFixed(2)} 元`, description: '当前停车场订单累计' },
   ]
 })
+const adminMergedRecords = computed(() => {
+  if (!dataset.value) {
+    return []
+  }
+  const keyword = adminRecordKeyword.value.trim().toLowerCase()
+  return dataset.value.records.filter((record) => {
+    const matchKeyword =
+      !keyword ||
+      record.plateNumber.toLowerCase().includes(keyword) ||
+      record.parkingLotName.toLowerCase().includes(keyword)
+    return matchKeyword
+  })
+})
 async function refresh() {
   dataset.value = await api.getDataset()
   const lots = dataset.value?.parkingLots ?? []
@@ -159,6 +183,7 @@ async function submitOwnerLogin() {
       throw new Error('请使用车主账号登录')
     }
     currentAccount.value = user.username
+    adminLoginMode.value = false
     ownerTab.value = 'query'
     banner.value = `已登录车主端：${user.realName}`
   } catch (error) {
@@ -167,20 +192,33 @@ async function submitOwnerLogin() {
 }
 
 function enterAdminPortal() {
+  adminLoginMode.value = true
+  banner.value = '请输入管理员账号进入后台。'
+}
+
+async function submitAdminLogin() {
   const user = dataset.value?.users.find((item) => item.username === 'admin')
-  if (!user) {
-    banner.value = '未找到管理员账号'
-    return
+  try {
+    await api.login(adminLoginForm)
+    if (!user || adminLoginForm.username !== 'admin') {
+      throw new Error('请使用管理员账号登录')
+    }
+    currentAccount.value = user.username
+    adminLoginMode.value = false
+    adminTab.value = 'income'
+    banner.value = `已进入管理员后台：${user.realName}`
+  } catch (error) {
+    banner.value = error instanceof Error ? error.message : '管理员登录失败'
   }
-  currentAccount.value = user.username
-  adminTab.value = 'income'
-  banner.value = `已进入管理员后台：${user.realName}`
 }
 
 function logout() {
   currentAccount.value = ''
+  adminLoginMode.value = false
   loginForm.username = 'owner'
   loginForm.password = '123456'
+  adminLoginForm.username = 'admin'
+  adminLoginForm.password = '123456'
   banner.value = '已退出登录，请重新选择车主登录或管理员入口。'
 }
 
@@ -228,6 +266,19 @@ async function checkOutVehicle(recordId: number) {
   }
 }
 
+function deleteRecord(recordId: number) {
+  if (!dataset.value) {
+    return
+  }
+  dataset.value.records = dataset.value.records.filter((record) => record.id !== recordId)
+  dataset.value.orders = dataset.value.orders.filter((order) => order.recordId !== recordId)
+  banner.value = `记录 ${recordId} 已删除。`
+}
+
+function editRecord(recordId: number) {
+  banner.value = `记录 ${recordId} 已进入编辑模式（答辩演示版）。`
+}
+
 onMounted(loadPage)
 </script>
 
@@ -237,7 +288,6 @@ onMounted(loadPage)
       <div class="login-copy">
         <span class="eyebrow">City Parking Resource Management</span>
         <h1>城市停车资源管理系统</h1>
-        <p>系统以车主使用为主，支持停车查询、车辆绑定、停车记录查看和订单查询；管理员可通过单独入口进入后台查看经营数据。</p>
         <div class="brand-mark">
           <div class="brand-icon">
             <span>P</span>
@@ -250,10 +300,9 @@ onMounted(loadPage)
       </div>
 
       <div class="login-stack">
-        <article class="login-card login-form-card">
+        <article v-if="!adminLoginMode" class="login-card login-form-card">
           <span>车主登录</span>
           <strong>进入停车服务</strong>
-          <p>登录后默认进入车主端导航，可切换查看停车查询、车辆管理、停车记录和订单查看。</p>
           <form class="stack-form" @submit.prevent="submitOwnerLogin">
             <input v-model="loginForm.username" placeholder="车主账号" />
             <input v-model="loginForm.password" type="password" placeholder="登录密码" />
@@ -261,11 +310,21 @@ onMounted(loadPage)
           </form>
         </article>
 
-        <button class="login-card admin-entry-card" @click="enterAdminPortal">
+        <article v-else class="login-card login-form-card admin-login-card">
+          <span>系统管理员</span>
+          <strong>管理员登录</strong>
+          <form class="stack-form" @submit.prevent="submitAdminLogin">
+            <input v-model="adminLoginForm.username" placeholder="管理员账号" />
+            <input v-model="adminLoginForm.password" type="password" placeholder="登录密码" />
+            <button type="submit">登录后台</button>
+          </form>
+          <button class="ghost-button inline-ghost" @click="adminLoginMode = false">返回首页</button>
+        </article>
+
+        <button v-if="!adminLoginMode" class="login-card admin-entry-card" @click="enterAdminPortal">
           <span>系统管理员</span>
           <strong>进入后台管理</strong>
-          <p>查看收入统计、停车记录订单记录和单停车场数据看板。</p>
-          <small>点击进入管理后台</small>
+          <small>点击进入管理员登录页</small>
         </button>
       </div>
     </section>
@@ -276,13 +335,7 @@ onMounted(loadPage)
       <div class="hero-copy">
         <span class="eyebrow">{{ isOwnerMobileView ? 'Owner Service Portal' : 'Admin Control Center' }}</span>
         <h1>{{ isOwnerMobileView ? '车主服务端' : '系统管理员后台' }}</h1>
-        <p>
-          {{
-            isOwnerMobileView
-              ? '通过统一导航完成停车查询、车辆管理、停车记录查看与订单查询，整体页面更贴近真实车主端使用逻辑。'
-              : '后台聚焦经营分析与记录管理，通过三个导航页完成收入统计、停车记录订单记录和单停车场运营看板查看。'
-          }}
-        </p>
+        <span class="hero-user-chip">{{ currentUser?.realName }} / {{ currentUser?.role }}</span>
         <div class="hero-actions">
           <template v-if="isOwnerMobileView">
             <button
@@ -309,13 +362,6 @@ onMounted(loadPage)
           <button class="pill logout-pill" @click="logout">退出登录</button>
         </div>
       </div>
-      <aside class="hero-panel">
-        <div class="status-card">
-          <p class="status-label">当前账号</p>
-          <strong>{{ currentUser?.realName }}</strong>
-          <span>{{ currentUser?.role }}</span>
-        </div>
-      </aside>
     </header>
 
     <section v-if="isOwnerMobileView" class="section">
@@ -426,70 +472,49 @@ onMounted(loadPage)
         </div>
       </article>
 
-      <div v-if="adminTab === 'records'" class="dual-grid">
-        <article class="panel">
-          <div class="panel-header">
-            <h2>停车记录</h2>
-            <span>查看车辆停车全过程</span>
-          </div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>车牌</th>
-                  <th>停车场</th>
-                  <th>入场时间</th>
-                  <th>状态</th>
-                  <th>操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="record in dataset.records" :key="record.id">
-                  <td>{{ record.plateNumber }}</td>
-                  <td>{{ record.parkingLotName }}</td>
-                  <td>{{ record.entryTime }}</td>
-                  <td><span class="badge" :class="record.status === '在场' ? 'warning' : 'success'">{{ record.status }}</span></td>
-                  <td>
-                    <button v-if="record.status === '在场'" class="ghost-button" @click="checkOutVehicle(record.id)">结算出场</button>
-                    <span v-else>{{ record.amount }} 元</span>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </article>
-
-        <article class="panel">
-          <div class="panel-header">
-            <h2>订单记录</h2>
-            <span>对照停车订单与支付结果</span>
-          </div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>车牌</th>
-                  <th>停车场</th>
-                  <th>支付金额</th>
-                  <th>出场时间</th>
-                  <th>状态</th>
-                  <th>支付时间</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="order in dataset.orders" :key="order.id">
-                  <td>{{ order.plateNumber }}</td>
-                  <td>{{ order.parkingLotName }}</td>
-                  <td>{{ order.amount }} 元</td>
-                  <td>{{ orderRecordMap.get(order.recordId) ?? '待出场' }}</td>
-                  <td><span class="badge success">{{ order.paymentStatus }}</span></td>
-                  <td>{{ order.createdAt }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </article>
-      </div>
+      <article v-if="adminTab === 'records'" class="panel">
+        <div class="panel-header">
+          <h2>停车记录与订单记录</h2>
+          <span>支持查询、删除、结算等演示操作</span>
+        </div>
+        <form class="compact-form dashboard-filter-form admin-search-form" @submit.prevent>
+          <input v-model="adminRecordKeyword" placeholder="按车牌号或停车场检索" />
+        </form>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>车牌</th>
+                <th>停车场</th>
+                <th>入场时间</th>
+                <th>出场时间</th>
+                <th>费用</th>
+                <th>订单状态</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="record in adminMergedRecords" :key="record.id">
+                <td>{{ record.plateNumber }}</td>
+                <td>{{ record.parkingLotName }}</td>
+                <td>{{ record.entryTime }}</td>
+                <td>{{ record.exitTime ?? '待出场' }}</td>
+                <td>{{ orderMap.get(record.id)?.amount ?? record.amount }} 元</td>
+                <td>
+                  <span class="badge" :class="record.status === '在场' ? 'warning' : 'success'">
+                    {{ orderMap.get(record.id)?.paymentStatus ?? record.status }}
+                  </span>
+                </td>
+                <td class="action-cell">
+                  <button v-if="record.status === '在场'" class="ghost-button" @click="checkOutVehicle(record.id)">结算</button>
+                  <button class="ghost-button" @click="editRecord(record.id)">编辑</button>
+                  <button class="ghost-button danger-ghost" @click="deleteRecord(record.id)">删除</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </article>
 
       <div v-if="adminTab === 'dashboard'" class="dual-grid">
         <article class="panel">

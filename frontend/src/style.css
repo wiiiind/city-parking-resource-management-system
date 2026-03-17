@@ -116,31 +116,6 @@ button {
   font-weight: 800;
 }
 
-.login-tips,
-.login-cards {
-  display: grid;
-  gap: 14px;
-}
-
-.login-tips {
-  margin-top: 28px;
-}
-
-.login-tips span {
-  display: inline-flex;
-  align-items: center;
-  width: fit-content;
-  padding: 8px 14px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.12);
-  color: rgba(247, 251, 255, 0.9);
-  font-size: 14px;
-}
-
-.login-cards {
-  grid-template-columns: 1fr;
-}
-
 .login-stack {
   display: grid;
   gap: 16px;
@@ -189,6 +164,10 @@ button {
   padding: 18px 22px;
 }
 
+.admin-login-card {
+  min-height: 240px;
+}
+
 .stack-form {
   display: grid;
   gap: 12px;
@@ -201,6 +180,10 @@ button {
   padding: 12px 18px;
   background: linear-gradient(135deg, #165a8b, #2b88aa);
   color: #fff;
+}
+
+.inline-ghost {
+  margin-top: 12px;
 }
 
 .owner-mobile-shell {
@@ -284,12 +267,6 @@ button {
   background: rgba(255, 255, 255, 0.2);
 }
 
-.hero-panel {
-  display: grid;
-  gap: 12px;
-}
-
-.status-card,
 .panel,
 .team-card,
 .metric-card,
@@ -299,26 +276,15 @@ button {
   box-shadow: 0 16px 36px rgba(13, 45, 75, 0.08);
 }
 
-.status-card {
-  padding: 20px;
-  color: #132238;
-}
-
-.banner-card {
-  background: rgba(255, 255, 255, 0.84);
-}
-
-.status-label {
-  display: block;
-  margin-bottom: 10px;
-  color: #617489;
+.hero-user-chip {
+  display: inline-flex;
+  width: fit-content;
+  margin-top: 4px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(247, 251, 255, 0.92);
   font-size: 14px;
-}
-
-.status-card strong {
-  display: block;
-  font-size: 1.4rem;
-  margin-bottom: 4px;
 }
 
 .section {
@@ -510,6 +476,11 @@ select {
   color: #165a8b;
 }
 
+.danger-ghost {
+  background: #feeaea;
+  color: #a53a3a;
+}
+
 .category-switch {
   display: flex;
   flex-wrap: wrap;
@@ -574,6 +545,12 @@ select {
   border-bottom: 1px dashed rgba(19, 34, 56, 0.12);
 }
 
+.action-cell {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .vehicle-grid,
 .account-cards,
 .docs-grid {
@@ -633,7 +610,6 @@ select {
   font-size: 13px;
 }
 
-.owner-mobile-shell .hero-panel,
 .owner-mobile-grid,
 .owner-mobile-shell .dual-grid,
 .owner-mobile-shell .vehicle-grid,
@@ -648,12 +624,8 @@ select {
   margin-top: 18px;
 }
 
-.owner-mobile-shell .panel,
-.owner-mobile-shell .status-card {
-  border-radius: 22px;
-}
-
 .owner-mobile-shell .panel {
+  border-radius: 22px;
   padding: 18px;
 }
 
