@@ -3,9 +3,11 @@ import type {
   AppDataset,
   LoginResult,
   LoginPayload,
+  RegisterPayload,
   ParkingLot,
   ParkingLotPayload,
   ParkingRecord,
+  User,
   Vehicle,
   VehiclePayload,
 } from '../types'
@@ -14,6 +16,11 @@ const API_BASE = 'http://localhost:8080/api'
 
 class DemoRepository {
   private dataset = structuredClone(createDemoDataset())
+  private credentials = new Map<string, string>([
+    ['admin', '123456'],
+    ['manager', '123456'],
+    ['owner', '123456'],
+  ])
 
   async getDataset(): Promise<AppDataset> {
     return structuredClone(this.dataset)
@@ -21,13 +28,38 @@ class DemoRepository {
 
   async login(payload: LoginPayload) {
     const user = this.dataset.users.find((item) => item.username === payload.username)
-    if (!user || payload.password !== '123456') {
+    if (!user || this.credentials.get(payload.username) !== payload.password) {
       throw new Error('账号或密码错误')
     }
     return {
       token: `demo-token-${payload.username}`,
       user,
     }
+  }
+
+  async registerOwner(payload: RegisterPayload): Promise<User> {
+    const exists = this.dataset.users.some((item) => item.username === payload.username)
+    if (exists) {
+      throw new Error('用户名已存在')
+    }
+    const user = {
+      id: this.dataset.users.length + 1,
+      username: payload.username,
+      realName: payload.realName,
+      role: '车主',
+      responsibility: '负责停车查询、车辆管理、停车缴费与订单查看',
+      phone: payload.phone,
+      status: '启用',
+    }
+    this.dataset.users.push(user)
+    this.credentials.set(payload.username, payload.password)
+    this.dataset.logs.unshift({
+      id: this.dataset.logs.length + 1,
+      action: '车主注册',
+      detail: `${payload.realName} 完成注册，账号 ${payload.username}`,
+      createdAt: formatDate(new Date()),
+    })
+    return user
   }
 
   async createVehicle(payload: VehiclePayload): Promise<Vehicle> {
@@ -52,6 +84,25 @@ class DemoRepository {
       createdAt: formatDate(new Date()),
     })
     return vehicle
+  }
+
+  async deleteVehicle(vehicleId: number) {
+    const activeRecord = this.dataset.records.find((item) => item.vehicleId === vehicleId && item.status === '在场')
+    if (activeRecord) {
+      throw new Error('该车辆存在在场记录，不能删除')
+    }
+    const vehicle = this.dataset.vehicles.find((item) => item.id === vehicleId)
+    if (!vehicle) {
+      throw new Error('车辆不存在')
+    }
+    this.dataset.vehicles = this.dataset.vehicles.filter((item) => item.id !== vehicleId)
+    this.dataset.logs.unshift({
+      id: this.dataset.logs.length + 1,
+      action: '删除车辆档案',
+      detail: `${vehicle.ownerName} 删除车辆 ${vehicle.plateNumber}`,
+      createdAt: formatDate(new Date()),
+    })
+    return true
   }
 
   async createParkingLot(payload: ParkingLotPayload): Promise<ParkingLot> {
@@ -223,12 +274,27 @@ export const api = {
     return result ?? demoRepository.login(payload)
   },
 
+  async registerOwner(payload: RegisterPayload): Promise<User> {
+    const result = await safeFetch<User>('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+    return result ?? demoRepository.registerOwner(payload)
+  },
+
   async createVehicle(payload: VehiclePayload) {
     const result = await safeFetch('/users/vehicles', {
       method: 'POST',
       body: JSON.stringify(payload),
     })
     return result ?? demoRepository.createVehicle(payload)
+  },
+
+  async deleteVehicle(vehicleId: number) {
+    const result = await safeFetch(`/users/vehicles/${vehicleId}`, {
+      method: 'DELETE',
+    })
+    return result ?? demoRepository.deleteVehicle(vehicleId)
   },
 
   async createParkingLot(payload: ParkingLotPayload) {

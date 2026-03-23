@@ -1,15 +1,16 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { api } from './services/api'
-import type { AppDataset, LoginPayload, Order, ParkingLotPayload, User, VehiclePayload } from './types'
+import type { AppDataset, LoginPayload, Order, ParkingLotPayload, RegisterPayload, User, VehiclePayload } from './types'
 
 const dataset = ref<AppDataset | null>(null)
 const loading = ref(true)
 const banner = ref('正在加载城市停车资源管理系统演示数据...')
 const currentAccount = ref('')
 const adminLoginMode = ref(false)
-const ownerTab = ref<'query' | 'vehicles' | 'records' | 'orders'>('query')
-const adminTab = ref<'income' | 'records' | 'dashboard'>('income')
+const ownerRegisterMode = ref(false)
+const ownerTab = ref<'home' | 'query' | 'vehicles' | 'payment' | 'orders'>('home')
+const adminTab = ref<'income' | 'records' | 'dashboard' | 'createLot'>('income')
 const lotCategoryFilter = ref<'全部' | '新能源' | '普通'>('全部')
 const selectedLotId = ref(1)
 const adminRecordKeyword = ref('')
@@ -17,6 +18,13 @@ const adminRecordKeyword = ref('')
 const loginForm = reactive<LoginPayload>({
   username: 'owner',
   password: '123456',
+})
+
+const registerForm = reactive<RegisterPayload>({
+  username: '',
+  password: '',
+  realName: '',
+  phone: '',
 })
 
 const adminLoginForm = reactive<LoginPayload>({
@@ -40,9 +48,10 @@ const vehicleForm = reactive<VehiclePayload>({
 })
 
 const ownerNav = [
+  { key: 'home', label: '功能首页' },
   { key: 'query', label: '停车查询' },
   { key: 'vehicles', label: '车辆管理' },
-  { key: 'records', label: '停车记录' },
+  { key: 'payment', label: '停车缴费' },
   { key: 'orders', label: '订单查看' },
 ] as const
 
@@ -50,6 +59,7 @@ const adminNav = [
   { key: 'income', label: '收入统计' },
   { key: 'records', label: '停车记录订单记录' },
   { key: 'dashboard', label: '单停车场看板' },
+  { key: 'createLot', label: '新增停车场' },
 ] as const
 
 const currentUser = computed<User | undefined>(() =>
@@ -64,8 +74,20 @@ const ownerVehicles = computed(() =>
 const ownerRecords = computed(() =>
   dataset.value?.records.filter((item) => item.ownerName === currentUser.value?.realName) ?? [],
 )
-const ownerOrders = computed(() =>
-  dataset.value?.orders.filter((item) => ownerVehicles.value.some((vehicle) => vehicle.plateNumber === item.plateNumber)) ?? [],
+const ownerPendingPayments = computed(() => ownerRecords.value.filter((item) => item.status === '在场'))
+const ownerOrderRows = computed(() =>
+  ownerRecords.value.map((record) => {
+    const order = orderMap.value.get(record.id)
+    return {
+      recordId: record.id,
+      plateNumber: record.plateNumber,
+      parkingLotName: record.parkingLotName,
+      amount: order?.amount ?? record.amount,
+      paymentStatus: order?.paymentStatus ?? '未支付',
+      exitTime: record.exitTime,
+      createdAt: order?.createdAt ?? '-',
+    }
+  }),
 )
 const orderRecordMap = computed(() => {
   const entries: Array<[number, string | null]> =
@@ -128,6 +150,16 @@ const lotDashboardRecords = computed(() => {
     return sameLot && matchCategory
   })
 })
+const occupiedVehicleRows = computed(() =>
+  lotDashboardRecords.value
+    .filter((record) => record.status === '在场')
+    .map((record) => ({
+      plateNumber: record.plateNumber,
+      ownerName: record.ownerName,
+      spaceCode: record.spaceCode,
+      entryTime: record.entryTime,
+    })),
+)
 const lotDashboardMetrics = computed(() => {
   if (!selectedLot.value) {
     return []
@@ -184,10 +216,29 @@ async function submitOwnerLogin() {
     }
     currentAccount.value = user.username
     adminLoginMode.value = false
-    ownerTab.value = 'query'
+    ownerTab.value = 'home'
     banner.value = `已登录车主端：${user.realName}`
   } catch (error) {
     banner.value = error instanceof Error ? error.message : '车主登录失败'
+  }
+}
+
+async function submitOwnerRegister() {
+  try {
+    const user = await api.registerOwner(registerForm)
+    await refresh()
+    loginForm.username = user.username
+    loginForm.password = registerForm.password
+    Object.assign(registerForm, {
+      username: '',
+      password: '',
+      realName: '',
+      phone: '',
+    })
+    ownerRegisterMode.value = false
+    banner.value = '注册成功，请使用新账号登录。'
+  } catch (error) {
+    banner.value = error instanceof Error ? error.message : '注册失败'
   }
 }
 
@@ -217,6 +268,7 @@ function logout() {
   adminLoginMode.value = false
   loginForm.username = 'owner'
   loginForm.password = '123456'
+  ownerRegisterMode.value = false
   adminLoginForm.username = 'admin'
   adminLoginForm.password = '123456'
   banner.value = '已退出登录，请重新选择车主登录或管理员入口。'
@@ -252,6 +304,16 @@ async function addVehicle() {
     banner.value = '车辆档案新增成功。'
   } catch (error) {
     banner.value = error instanceof Error ? error.message : '新增车辆失败'
+  }
+}
+
+async function removeVehicle(vehicleId: number) {
+  try {
+    await api.deleteVehicle(vehicleId)
+    await refresh()
+    banner.value = '车辆删除成功。'
+  } catch (error) {
+    banner.value = error instanceof Error ? error.message : '删除车辆失败'
   }
 }
 
@@ -301,13 +363,23 @@ onMounted(loadPage)
 
       <div class="login-stack">
         <article v-if="!adminLoginMode" class="login-card login-form-card">
-          <span>车主登录</span>
-          <strong>进入停车服务</strong>
-          <form class="stack-form" @submit.prevent="submitOwnerLogin">
+          <span>{{ ownerRegisterMode ? '车主注册' : '车主登录' }}</span>
+          <strong>{{ ownerRegisterMode ? '注册车主账号' : '进入停车服务' }}</strong>
+          <form v-if="!ownerRegisterMode" class="stack-form" @submit.prevent="submitOwnerLogin">
             <input v-model="loginForm.username" placeholder="车主账号" />
             <input v-model="loginForm.password" type="password" placeholder="登录密码" />
             <button type="submit">登录车主端</button>
           </form>
+          <form v-else class="stack-form" @submit.prevent="submitOwnerRegister">
+            <input v-model="registerForm.username" placeholder="注册账号" />
+            <input v-model="registerForm.realName" placeholder="姓名" />
+            <input v-model="registerForm.phone" placeholder="手机号" />
+            <input v-model="registerForm.password" type="password" placeholder="设置密码" />
+            <button type="submit">注册车主</button>
+          </form>
+          <button class="ghost-button inline-ghost" @click="ownerRegisterMode = !ownerRegisterMode">
+            {{ ownerRegisterMode ? '返回登录' : '没有账号？去注册' }}
+          </button>
         </article>
 
         <article v-else class="login-card login-form-card admin-login-card">
@@ -365,6 +437,30 @@ onMounted(loadPage)
     </header>
 
     <section v-if="isOwnerMobileView" class="section">
+      <article v-if="ownerTab === 'home'" class="panel owner-mobile-panel">
+        <div class="panel-header">
+          <h2>车主功能入口</h2>
+        </div>
+        <div class="entry-grid">
+          <button class="entry-card" @click="ownerTab = 'query'">
+            <strong>停车查询</strong>
+            <span>查看停车场与收费规则</span>
+          </button>
+          <button class="entry-card" @click="ownerTab = 'vehicles'">
+            <strong>车辆管理</strong>
+            <span>新增和维护车辆信息</span>
+          </button>
+          <button class="entry-card" @click="ownerTab = 'payment'">
+            <strong>停车缴费</strong>
+            <span>处理在场车辆的缴费</span>
+          </button>
+          <button class="entry-card" @click="ownerTab = 'orders'">
+            <strong>订单查看</strong>
+            <span>查看已支付和未支付订单</span>
+          </button>
+        </div>
+      </article>
+
       <article v-if="ownerTab === 'query'" class="panel owner-mobile-panel">
         <div class="panel-header">
           <h2>停车查询</h2>
@@ -404,26 +500,24 @@ onMounted(loadPage)
             <strong>{{ vehicle.plateNumber }}</strong>
             <span>{{ vehicle.brand }} / {{ vehicle.color }}</span>
             <p>{{ vehicle.ownerName }}</p>
+            <button class="ghost-button inline-ghost" @click="removeVehicle(vehicle.id)">删除车辆</button>
           </div>
         </div>
       </article>
 
-      <article v-if="ownerTab === 'records'" class="panel owner-mobile-panel">
+      <article v-if="ownerTab === 'payment'" class="panel owner-mobile-panel">
         <div class="panel-header">
-          <h2>停车记录</h2>
-          <span>查看在场记录与历史停车情况</span>
+          <h2>停车缴费</h2>
+          <span>只保留待支付停车记录</span>
         </div>
         <div class="active-records">
-          <div v-for="record in ownerRecords" :key="record.id" class="active-card">
+          <div v-for="record in ownerPendingPayments" :key="record.id" class="active-card">
             <div>
               <strong>{{ record.plateNumber }} / {{ record.parkingLotName }}</strong>
               <span>入场时间：{{ record.entryTime }}</span>
-              <span v-if="record.exitTime">出场时间：{{ record.exitTime }}</span>
-              <span v-if="record.status === '已完成'">已缴费用：{{ record.amount }} 元</span>
-              <span v-else>当前状态：在场，待支付</span>
+              <span>当前状态：在场，待支付</span>
             </div>
-            <button v-if="record.status === '在场'" class="ghost-button" @click="checkOutVehicle(record.id)">支付停车费用</button>
-            <span v-else class="badge success">已完成</span>
+            <button class="ghost-button" @click="checkOutVehicle(record.id)">支付停车费用</button>
           </div>
         </div>
       </article>
@@ -431,13 +525,13 @@ onMounted(loadPage)
       <article v-if="ownerTab === 'orders'" class="panel owner-mobile-panel">
         <div class="panel-header">
           <h2>订单查看</h2>
-          <span>查看停车缴费订单</span>
+          <span>查看已支付和未支付订单</span>
         </div>
         <div class="notice-list">
-          <div v-for="order in ownerOrders" :key="order.id" class="notice-card">
+          <div v-for="order in ownerOrderRows" :key="order.recordId" class="notice-card">
             <div class="notice-title">
               <strong>{{ order.plateNumber }}</strong>
-              <span class="badge success">{{ order.paymentStatus }}</span>
+              <span class="badge" :class="order.paymentStatus === '已支付' ? 'success' : 'warning'">{{ order.paymentStatus }}</span>
             </div>
             <p>{{ order.parkingLotName }}</p>
             <p>支付金额：{{ order.amount }} 元</p>
@@ -452,13 +546,11 @@ onMounted(loadPage)
       <article v-if="adminTab === 'income'" class="panel">
         <div class="panel-header">
           <h2>收入统计</h2>
-          <span>聚焦经营指标与停车场收入情况</span>
         </div>
         <div class="card-grid metrics">
           <article v-for="metric in dataset.overview.metrics" :key="metric.title" class="metric-card">
             <span>{{ metric.title }}</span>
             <strong>{{ metric.value }}</strong>
-            <p>{{ metric.description }}</p>
           </article>
         </div>
         <div class="dual-grid admin-summary-grid">
@@ -475,7 +567,6 @@ onMounted(loadPage)
       <article v-if="adminTab === 'records'" class="panel">
         <div class="panel-header">
           <h2>停车记录与订单记录</h2>
-          <span>支持查询、删除、结算等演示操作</span>
         </div>
         <form class="compact-form dashboard-filter-form admin-search-form" @submit.prevent>
           <input v-model="adminRecordKeyword" placeholder="按车牌号或停车场检索" />
@@ -520,28 +611,31 @@ onMounted(loadPage)
         <article class="panel">
           <div class="panel-header">
             <h2>停车场数据筛选</h2>
-            <span>可切换停车场和车位类别</span>
           </div>
-          <form class="compact-form dashboard-filter-form">
-            <select v-model.number="selectedLotId">
-              <option v-for="lot in dataset.parkingLots" :key="lot.id" :value="lot.id">
-                {{ lot.name }}
-              </option>
-            </select>
-            <div class="category-switch">
-              <button type="button" class="ghost-button" :class="{ 'active-switch': lotCategoryFilter === '全部' }" @click="lotCategoryFilter = '全部'">全部</button>
-              <button type="button" class="ghost-button" :class="{ 'active-switch': lotCategoryFilter === '新能源' }" @click="lotCategoryFilter = '新能源'">新能源车</button>
-              <button type="button" class="ghost-button" :class="{ 'active-switch': lotCategoryFilter === '普通' }" @click="lotCategoryFilter = '普通'">普通车</button>
+          <div class="dashboard-left-layout">
+            <div class="lot-selector-card">
+              <span>选择停车场</span>
+              <select v-model.number="selectedLotId">
+                <option v-for="lot in dataset.parkingLots" :key="lot.id" :value="lot.id">
+                  {{ lot.name }}
+                </option>
+              </select>
             </div>
-          </form>
-          <form class="compact-form" @submit.prevent="addParkingLot">
-            <input v-model="parkingLotForm.name" placeholder="新增停车场名称" />
-            <input v-model="parkingLotForm.code" placeholder="停车场编码" />
-            <input v-model="parkingLotForm.address" placeholder="停车场地址" />
-            <input v-model.number="parkingLotForm.totalSpaces" type="number" min="1" placeholder="总车位数" />
-            <input v-model="parkingLotForm.businessHours" placeholder="营业时间" />
-            <button type="submit">新增停车场</button>
-          </form>
+            <div class="dashboard-mini-grid">
+              <button type="button" class="mini-filter-card" :class="{ 'active-switch': lotCategoryFilter === '全部' }" @click="lotCategoryFilter = '全部'">
+                <strong>全部</strong>
+                <span>查看全部车位</span>
+              </button>
+              <button type="button" class="mini-filter-card" :class="{ 'active-switch': lotCategoryFilter === '新能源' }" @click="lotCategoryFilter = '新能源'">
+                <strong>新能源车</strong>
+                <span>筛选新能源车位</span>
+              </button>
+              <button type="button" class="mini-filter-card" :class="{ 'active-switch': lotCategoryFilter === '普通' }" @click="lotCategoryFilter = '普通'">
+                <strong>普通车</strong>
+                <span>筛选普通车位</span>
+              </button>
+            </div>
+          </div>
         </article>
 
         <article class="panel">
@@ -553,7 +647,6 @@ onMounted(loadPage)
             <article v-for="metric in lotDashboardMetrics" :key="metric.title" class="metric-card">
               <span>{{ metric.title }}</span>
               <strong>{{ metric.value }}</strong>
-              <p>{{ metric.description }}</p>
             </article>
           </div>
           <div class="space-tags">
@@ -561,15 +654,42 @@ onMounted(loadPage)
               {{ space.code }} / {{ space.category }} / {{ space.status }}
             </span>
           </div>
-          <div class="log-list">
-            <div v-for="record in lotDashboardRecords" :key="record.id" class="log-item">
-              <strong>{{ record.plateNumber }} / {{ record.status }}</strong>
-              <span>{{ record.parkingLotName }} · {{ record.spaceCode }}</span>
-              <small>{{ record.entryTime }}</small>
-            </div>
+          <div class="table-wrap occupied-table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>车牌</th>
+                  <th>车主</th>
+                  <th>车位</th>
+                  <th>入场时间</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="item in occupiedVehicleRows" :key="item.plateNumber + item.spaceCode">
+                  <td>{{ item.plateNumber }}</td>
+                  <td>{{ item.ownerName }}</td>
+                  <td>{{ item.spaceCode }}</td>
+                  <td>{{ item.entryTime }}</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </article>
       </div>
+
+      <article v-if="adminTab === 'createLot'" class="panel">
+        <div class="panel-header">
+          <h2>新增停车场</h2>
+        </div>
+        <form class="compact-form create-lot-form" @submit.prevent="addParkingLot">
+          <input v-model="parkingLotForm.name" placeholder="新增停车场名称" />
+          <input v-model="parkingLotForm.code" placeholder="停车场编码" />
+          <input v-model="parkingLotForm.address" placeholder="停车场地址" />
+          <input v-model.number="parkingLotForm.totalSpaces" type="number" min="1" placeholder="总车位数" />
+          <input v-model="parkingLotForm.businessHours" placeholder="营业时间" />
+          <button type="submit">新增停车场</button>
+        </form>
+      </article>
     </section>
   </div>
 

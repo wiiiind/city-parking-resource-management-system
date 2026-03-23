@@ -339,6 +339,32 @@ button {
   padding: 24px;
 }
 
+.entry-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.entry-card {
+  border: 0;
+  padding: 18px;
+  text-align: left;
+  border-radius: 18px;
+  background: #f7fbff;
+  color: #132238;
+  box-shadow: inset 0 0 0 1px rgba(19, 34, 56, 0.06);
+}
+
+.entry-card strong {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 1.05rem;
+}
+
+.entry-card span {
+  color: #6b7b8a;
+  font-size: 14px;
+}
+
 .panel-header {
   display: flex;
   align-items: flex-end;
@@ -492,6 +518,52 @@ select {
   color: #fff;
 }
 
+.dashboard-left-layout {
+  display: grid;
+  gap: 16px;
+}
+
+.lot-selector-card,
+.mini-filter-card {
+  border-radius: 18px;
+  background: #f7fbff;
+  box-shadow: inset 0 0 0 1px rgba(19, 34, 56, 0.06);
+}
+
+.lot-selector-card {
+  padding: 20px;
+}
+
+.lot-selector-card span {
+  display: block;
+  margin-bottom: 12px;
+  color: #6b7b8a;
+  font-size: 14px;
+}
+
+.dashboard-mini-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.mini-filter-card {
+  border: 0;
+  padding: 16px;
+  text-align: left;
+  color: #132238;
+}
+
+.mini-filter-card strong {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.mini-filter-card span {
+  color: #6b7b8a;
+  font-size: 13px;
+}
+
 .space-tags,
 .vehicle-grid,
 .account-cards {
@@ -549,6 +621,14 @@ select {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.occupied-table-wrap {
+  margin-top: 18px;
+}
+
+.create-lot-form {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .vehicle-grid,
@@ -672,6 +752,11 @@ select {
   .docs-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .dashboard-mini-grid,
+  .create-lot-form {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 720px) {
@@ -689,6 +774,11 @@ select {
   .vehicle-grid,
   .account-cards,
   .docs-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-mini-grid,
+  .create-lot-form {
     grid-template-columns: 1fr;
   }
 

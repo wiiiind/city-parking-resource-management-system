@@ -168,6 +168,13 @@ export interface LoginPayload {
   password: string
 }
 
+export interface RegisterPayload {
+  username: string
+  password: string
+  realName: string
+  phone: string
+}
+
 export interface LoginResult {
   token: string
   user: User

@@ -3,6 +3,7 @@ package com.parking.system.service;
 import com.parking.system.dto.CheckInRequest;
 import com.parking.system.dto.LoginRequest;
 import com.parking.system.dto.ParkingLotCreateRequest;
+import com.parking.system.dto.RegisterRequest;
 import com.parking.system.dto.VehicleCreateRequest;
 import jakarta.annotation.PostConstruct;
 import org.springframework.stereotype.Service;
@@ -17,6 +18,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.HashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
 @Service
@@ -40,6 +42,7 @@ public class ParkingDemoService {
     private final List<Map<String, Object>> orders = new ArrayList<>();
     private final List<Map<String, Object>> notices = new ArrayList<>();
     private final List<Map<String, Object>> operationLogs = new ArrayList<>();
+    private final Map<String, String> credentials = new HashMap<>();
 
     @PostConstruct
     public void init() {
@@ -58,12 +61,36 @@ public class ParkingDemoService {
         if (user == null) {
             throw new IllegalArgumentException("账号不存在");
         }
+        String password = credentials.get(request.username());
+        if (password == null || !password.equals(request.password())) {
+            throw new IllegalArgumentException("密码错误");
+        }
         String role = String.valueOf(user.get("role"));
         return Map.of(
                 "token", "demo-token-" + request.username(),
                 "user", user,
                 "menus", buildMenus(role)
         );
+    }
+
+    public synchronized Map<String, Object> registerOwner(RegisterRequest request) {
+        boolean usernameExists = users.stream()
+                .anyMatch(item -> String.valueOf(item.get("username")).equals(request.username()));
+        if (usernameExists) {
+            throw new IllegalArgumentException("用户名已存在");
+        }
+        Map<String, Object> user = user(
+                userId.incrementAndGet(),
+                request.username(),
+                request.realName(),
+                "车主",
+                "负责停车查询、车辆管理、停车缴费与订单查看",
+                request.phone()
+        );
+        users.add(user);
+        credentials.put(request.username(), request.password());
+        appendLog("车主注册", request.realName() + " 完成注册，账号 " + request.username());
+        return user;
     }
 
     public synchronized Map<String, Object> currentUser() {
@@ -103,6 +130,17 @@ public class ParkingDemoService {
         vehicles.add(vehicle);
         appendLog("新增车辆档案", "车主 " + owner.get("realName") + " 新增车辆 " + request.plateNumber());
         return vehicle;
+    }
+
+    public synchronized void deleteVehicle(Long currentVehicleId) {
+        Map<String, Object> vehicle = getById(vehicles, currentVehicleId, "车辆不存在");
+        boolean activeRecordExists = parkingRecords.stream()
+                .anyMatch(item -> item.get("vehicleId").equals(currentVehicleId) && "在场".equals(item.get("status")));
+        if (activeRecordExists) {
+            throw new IllegalArgumentException("该车辆存在在场记录，不能删除");
+        }
+        vehicles.removeIf(item -> item.get("id").equals(currentVehicleId));
+        appendLog("删除车辆档案", "删除车辆 " + vehicle.get("plateNumber"));
     }
 
     public synchronized List<Map<String, Object>> listParkingLots() {
@@ -323,6 +361,9 @@ public class ParkingDemoService {
         users.add(user(1L, "admin", "系统管理员", "管理员", "负责系统配置、资源管理和全局监控", "13800000001"));
         users.add(user(2L, "manager", "停车场主管", "停车场管理员", "负责停车场资源维护与订单处理", "13800000002"));
         users.add(user(3L, "owner", "张晓彤", "车主", "负责车辆维护、停车查询和订单查看", "13800000003"));
+        credentials.put("admin", "123456");
+        credentials.put("manager", "123456");
+        credentials.put("owner", "123456");
     }
 
     private void seedVehicles() {

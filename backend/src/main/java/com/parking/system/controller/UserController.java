@@ -4,7 +4,9 @@ import com.parking.system.common.ApiResponse;
 import com.parking.system.dto.VehicleCreateRequest;
 import com.parking.system.service.ParkingDemoService;
 import jakarta.validation.Valid;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -33,5 +35,11 @@ public class UserController {
     @PostMapping("/vehicles")
     public ApiResponse<?> createVehicle(@Valid @RequestBody VehicleCreateRequest request) {
         return ApiResponse.ok("车辆新增成功", parkingDemoService.createVehicle(request));
+    }
+
+    @DeleteMapping("/vehicles/{vehicleId}")
+    public ApiResponse<?> deleteVehicle(@PathVariable Long vehicleId) {
+        parkingDemoService.deleteVehicle(vehicleId);
+        return ApiResponse.ok("车辆删除成功");
     }
 }

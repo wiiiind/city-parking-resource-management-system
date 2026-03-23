@@ -2,6 +2,7 @@ package com.parking.system.controller;
 
 import com.parking.system.common.ApiResponse;
 import com.parking.system.dto.LoginRequest;
+import com.parking.system.dto.RegisterRequest;
 import com.parking.system.service.ParkingDemoService;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -24,6 +25,11 @@ public class AuthController {
     @PostMapping("/login")
     public ApiResponse<?> login(@Valid @RequestBody LoginRequest request) {
         return ApiResponse.ok("登录成功", parkingDemoService.login(request));
+    }
+
+    @PostMapping("/register")
+    public ApiResponse<?> register(@Valid @RequestBody RegisterRequest request) {
+        return ApiResponse.ok("注册成功", parkingDemoService.registerOwner(request));
     }
 
     @GetMapping("/me")
