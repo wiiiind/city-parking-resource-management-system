@@ -175,6 +175,13 @@ export interface RegisterPayload {
   phone: string
 }
 
+export interface RecordUpdatePayload {
+  entryTime: string
+  exitTime: string
+  amount: number
+  paymentStatus: string
+}
+
 export interface LoginResult {
   token: string
   user: User

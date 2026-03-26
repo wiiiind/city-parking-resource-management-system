@@ -4,6 +4,7 @@ import type {
   LoginResult,
   LoginPayload,
   RegisterPayload,
+  RecordUpdatePayload,
   ParkingLot,
   ParkingLotPayload,
   ParkingRecord,
@@ -196,13 +197,80 @@ class DemoRepository {
       plateNumber: record.plateNumber,
       parkingLotName: record.parkingLotName,
       amount: record.amount,
-      paymentStatus: '已支付',
+      paymentStatus: '未支付',
       createdAt: record.exitTime,
     })
     this.dataset.logs.unshift({
       id: this.dataset.logs.length + 1,
-      action: '车辆出场',
-      detail: `${record.plateNumber} 离开 ${record.parkingLotName}，结算 ${record.amount} 元`,
+      action: '车辆出场待支付',
+      detail: `${record.plateNumber} 离开 ${record.parkingLotName}，待支付 ${record.amount} 元`,
+      createdAt: formatDate(new Date()),
+    })
+    return structuredClone(record)
+  }
+
+  async payOrder(recordId: number) {
+    const order = this.dataset.orders.find((item) => item.recordId === recordId)
+    if (!order) {
+      throw new Error('订单不存在')
+    }
+    if (order.paymentStatus === '已支付') {
+      return structuredClone(order)
+    }
+    order.paymentStatus = '已支付'
+    order.createdAt = formatDate(new Date())
+    this.dataset.logs.unshift({
+      id: this.dataset.logs.length + 1,
+      action: '支付停车订单',
+      detail: `${order.plateNumber} 完成停车支付 ${order.amount} 元`,
+      createdAt: formatDate(new Date()),
+    })
+    return structuredClone(order)
+  }
+
+  async updateRecord(recordId: number, payload: RecordUpdatePayload) {
+    const record = this.dataset.records.find((item) => item.id === recordId)
+    if (!record) {
+      throw new Error('停车记录不存在')
+    }
+
+    record.entryTime = payload.entryTime
+    record.exitTime = payload.exitTime || null
+    record.amount = Number(payload.amount)
+
+    if (record.exitTime) {
+      const entryTime = new Date(record.entryTime.replace(' ', 'T'))
+      const exitTime = new Date(record.exitTime.replace(' ', 'T'))
+      record.durationMinutes = Math.max(0, Math.round((exitTime.getTime() - entryTime.getTime()) / 60000))
+      record.status = '已完成'
+
+      const currentOrder = this.dataset.orders.find((item) => item.recordId === recordId)
+      if (currentOrder) {
+        currentOrder.amount = record.amount
+        currentOrder.paymentStatus = payload.paymentStatus
+        currentOrder.createdAt = record.exitTime
+      } else {
+        this.dataset.orders.unshift({
+          id: this.dataset.orders.length + 1,
+          recordId,
+          plateNumber: record.plateNumber,
+          parkingLotName: record.parkingLotName,
+          amount: record.amount,
+          paymentStatus: payload.paymentStatus,
+          createdAt: record.exitTime,
+        })
+      }
+    } else {
+      record.durationMinutes = 0
+      record.amount = 0
+      record.status = '在场'
+      this.dataset.orders = this.dataset.orders.filter((item) => item.recordId !== recordId)
+    }
+
+    this.dataset.logs.unshift({
+      id: this.dataset.logs.length + 1,
+      action: '编辑停车记录',
+      detail: `${record.plateNumber} 的停车记录已更新`,
       createdAt: formatDate(new Date()),
     })
     return structuredClone(record)
@@ -319,6 +387,22 @@ export const api = {
       body: JSON.stringify({ recordId }),
     })
     return result ?? demoRepository.checkOut(recordId)
+  },
+
+  async payOrder(recordId: number) {
+    const result = await safeFetch('/records/orders/pay', {
+      method: 'POST',
+      body: JSON.stringify({ recordId }),
+    })
+    return result ?? demoRepository.payOrder(recordId)
+  },
+
+  async updateRecord(recordId: number, payload: RecordUpdatePayload) {
+    const result = await safeFetch(`/records/${recordId}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    })
+    return result ?? demoRepository.updateRecord(recordId, payload)
   },
 }
 

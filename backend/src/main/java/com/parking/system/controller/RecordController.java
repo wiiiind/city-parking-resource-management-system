@@ -3,10 +3,13 @@ package com.parking.system.controller;
 import com.parking.system.common.ApiResponse;
 import com.parking.system.dto.CheckInRequest;
 import com.parking.system.dto.CheckOutRequest;
+import com.parking.system.dto.RecordUpdateRequest;
 import com.parking.system.service.ParkingDemoService;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -39,5 +42,10 @@ public class RecordController {
     @PostMapping("/check-out")
     public ApiResponse<?> checkOut(@Valid @RequestBody CheckOutRequest request) {
         return ApiResponse.ok("车辆出场成功", parkingDemoService.checkOut(request.recordId()));
+    }
+
+    @PutMapping("/{recordId}")
+    public ApiResponse<?> updateRecord(@PathVariable Long recordId, @Valid @RequestBody RecordUpdateRequest request) {
+        return ApiResponse.ok("停车记录更新成功", parkingDemoService.updateRecord(recordId, request));
     }
 }

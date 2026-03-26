@@ -41,3 +41,7 @@ __pycache__/
 .java-wrapper/
 tmp/
 temp/
+
+# Local docs not for versioning
+docs/远程协作环境部署指南.md
+docs/远程环境复用安装指南.md

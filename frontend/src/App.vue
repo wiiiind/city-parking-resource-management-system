@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { api } from './services/api'
-import type { AppDataset, LoginPayload, Order, ParkingLotPayload, RegisterPayload, User, VehiclePayload } from './types'
+import type { AppDataset, LoginPayload, Order, ParkingLotPayload, RecordUpdatePayload, RegisterPayload, User, VehiclePayload } from './types'
 
 const dataset = ref<AppDataset | null>(null)
 const loading = ref(true)
@@ -9,11 +9,23 @@ const banner = ref('正在加载城市停车资源管理系统演示数据...')
 const currentAccount = ref('')
 const adminLoginMode = ref(false)
 const ownerRegisterMode = ref(false)
-const ownerTab = ref<'home' | 'query' | 'vehicles' | 'payment' | 'orders'>('home')
+const ownerTab = ref<'home' | 'parking' | 'payment' | 'profile'>('home')
+const ownerProfilePage = ref<'menu' | 'vehicles' | 'orders' | 'orderDetail'>('menu')
+const vehicleFormVisible = ref(false)
+const swipedVehicleId = ref<number | null>(null)
+const vehicleSwipeStartX = ref(0)
+const vehicleSwipeId = ref<number | null>(null)
 const adminTab = ref<'income' | 'records' | 'dashboard' | 'createLot'>('income')
 const lotCategoryFilter = ref<'全部' | '新能源' | '普通'>('全部')
+const ownerParkingFilter = ref<'全部' | '空位优先' | '全天开放'>('全部')
+const parkingSearchKeyword = ref('')
+const selectedParkingCity = ref('')
+const parkingCityMenuOpen = ref(false)
+const parkingSearchActive = ref(false)
 const selectedLotId = ref(1)
 const adminRecordKeyword = ref('')
+const editingRecordId = ref<number | null>(null)
+const selectedOwnerOrderId = ref<number | null>(null)
 
 const loginForm = reactive<LoginPayload>({
   username: 'owner',
@@ -47,12 +59,18 @@ const vehicleForm = reactive<VehiclePayload>({
   color: '',
 })
 
+const recordEditForm = reactive<RecordUpdatePayload>({
+  entryTime: '',
+  exitTime: '',
+  amount: 0,
+  paymentStatus: '已支付',
+})
+
 const ownerNav = [
-  { key: 'home', label: '功能首页' },
-  { key: 'query', label: '停车查询' },
-  { key: 'vehicles', label: '车辆管理' },
-  { key: 'payment', label: '停车缴费' },
-  { key: 'orders', label: '订单查看' },
+  { key: 'home', label: '首页' },
+  { key: 'parking', label: '停车' },
+  { key: 'payment', label: '缴费' },
+  { key: 'profile', label: '我的' },
 ] as const
 
 const adminNav = [
@@ -67,7 +85,6 @@ const currentUser = computed<User | undefined>(() =>
 )
 const loggedIn = computed(() => Boolean(currentUser.value))
 const isOwnerMobileView = computed(() => currentUser.value?.role === '车主')
-const ownerUsers = computed(() => dataset.value?.users.filter((item) => item.role === '车主') ?? [])
 const ownerVehicles = computed(() =>
   dataset.value?.vehicles.filter((item) => item.userId === currentUser.value?.id) ?? [],
 )
@@ -89,6 +106,26 @@ const ownerOrderRows = computed(() =>
     }
   }),
 )
+const ownerLatestOrder = computed(() => ownerOrderRows.value[0] ?? null)
+const selectedOwnerOrder = computed(() =>
+  ownerOrderRows.value.find((order) => order.recordId === selectedOwnerOrderId.value) ?? null,
+)
+const ownerParkingOverview = computed(() => {
+  const rows = ownerPendingPayments.value.map((record) => ({
+    id: record.id,
+    plateNumber: record.plateNumber,
+    parkingLotName: record.parkingLotName,
+    durationText: formatDurationMinutes(record.durationMinutes),
+    amountText: `${record.amount}元`,
+  }))
+  const totalAmount = ownerPendingPayments.value.reduce((sum, record) => sum + Number(record.amount), 0)
+  return {
+    count: rows.length,
+    totalAmount: `${totalAmount}元`,
+    items: rows.slice(0, 2),
+    hiddenCount: Math.max(0, rows.length - 2),
+  }
+})
 const orderRecordMap = computed(() => {
   const entries: Array<[number, string | null]> =
     dataset.value?.records.map((record) => [record.id, record.exitTime]) ?? []
@@ -106,6 +143,43 @@ const lotPricingMap = computed(() => {
       `首${rule.baseMinutes}分钟${rule.baseFee}元，之后${rule.hourlyFee}元/小时，封顶${rule.dailyCap}元`,
     ]) ?? []
   return new Map(entries)
+})
+const ownerParkingLots = computed(() => {
+  if (!dataset.value) {
+    return []
+  }
+
+  const keyword = parkingSearchKeyword.value.trim().toLowerCase()
+  let list = dataset.value.parkingLots.filter((lot) => {
+    const matchCity = !selectedParkingCity.value || lot.address.includes(selectedParkingCity.value)
+    if (!keyword) {
+      return matchCity
+    }
+    return matchCity && (lot.name.toLowerCase().includes(keyword) || lot.address.toLowerCase().includes(keyword))
+  })
+
+  if (ownerParkingFilter.value === '全天开放') {
+    list = list.filter((lot) => lot.businessHours.includes('全天'))
+  }
+
+  if (ownerParkingFilter.value === '空位优先') {
+    list = [...list].sort((a, b) => b.freeSpaces - a.freeSpaces)
+  }
+
+  return list
+})
+const ownerParkingCities = computed(() => {
+  if (!dataset.value) {
+    return []
+  }
+  const cities = new Set(
+    dataset.value.parkingLots
+      .map((lot) => {
+        const match = lot.address.match(/^(.+?市)/)
+        return match?.[1]
+      }),
+  )
+  return Array.from(cities).filter((city): city is string => Boolean(city))
 })
 const adminRevenueSummary = computed(() => {
   if (!dataset.value) {
@@ -193,6 +267,16 @@ const adminMergedRecords = computed(() => {
 })
 async function refresh() {
   dataset.value = await api.getDataset()
+  const cities = Array.from(
+    new Set(
+      (dataset.value?.parkingLots ?? [])
+        .map((lot) => lot.address.match(/^(.+?市)/)?.[1])
+        .filter((city): city is string => Boolean(city)),
+    ),
+  )
+  if (cities.length > 0 && (!selectedParkingCity.value || !cities.includes(selectedParkingCity.value))) {
+    selectedParkingCity.value = cities[0]!
+  }
   const lots = dataset.value?.parkingLots ?? []
   const firstLot = lots[0]
   if (firstLot && !lots.some((item) => item.id === selectedLotId.value)) {
@@ -217,6 +301,9 @@ async function submitOwnerLogin() {
     currentAccount.value = user.username
     adminLoginMode.value = false
     ownerTab.value = 'home'
+    ownerProfilePage.value = 'menu'
+    vehicleFormVisible.value = false
+    swipedVehicleId.value = null
     banner.value = `已登录车主端：${user.realName}`
   } catch (error) {
     banner.value = error instanceof Error ? error.message : '车主登录失败'
@@ -266,6 +353,10 @@ async function submitAdminLogin() {
 function logout() {
   currentAccount.value = ''
   adminLoginMode.value = false
+  ownerProfilePage.value = 'menu'
+  selectedOwnerOrderId.value = null
+  vehicleFormVisible.value = false
+  swipedVehicleId.value = null
   loginForm.username = 'owner'
   loginForm.password = '123456'
   ownerRegisterMode.value = false
@@ -293,6 +384,7 @@ async function addParkingLot() {
 
 async function addVehicle() {
   try {
+    vehicleForm.userId = currentUser.value?.id ?? 3
     await api.createVehicle(vehicleForm)
     await refresh()
     Object.assign(vehicleForm, {
@@ -301,6 +393,7 @@ async function addVehicle() {
       brand: '',
       color: '',
     })
+    vehicleFormVisible.value = false
     banner.value = '车辆档案新增成功。'
   } catch (error) {
     banner.value = error instanceof Error ? error.message : '新增车辆失败'
@@ -321,11 +414,94 @@ async function checkOutVehicle(recordId: number) {
   try {
     await api.checkOut(recordId)
     await refresh()
-    ownerTab.value = isOwnerMobileView.value ? 'orders' : ownerTab.value
-    banner.value = '停车费用已结算，订单信息已更新。'
+    ownerTab.value = 'profile'
+    ownerProfilePage.value = 'orderDetail'
+    selectedOwnerOrderId.value = recordId
+    banner.value = '已生成待支付订单，请确认支付。'
   } catch (error) {
     banner.value = error instanceof Error ? error.message : '车辆出场失败'
   }
+}
+
+async function payOwnerOrder(recordId: number) {
+  try {
+    await api.payOrder(recordId)
+    await refresh()
+    ownerTab.value = 'profile'
+    ownerProfilePage.value = 'orderDetail'
+    selectedOwnerOrderId.value = recordId
+    banner.value = '支付成功，订单状态已更新。'
+  } catch (error) {
+    banner.value = error instanceof Error ? error.message : '支付失败'
+  }
+}
+
+function selectOwnerTab(tab: 'home' | 'parking' | 'payment' | 'profile') {
+  ownerTab.value = tab
+  if (tab === 'profile') {
+    ownerProfilePage.value = 'menu'
+    selectedOwnerOrderId.value = null
+  }
+}
+
+function openOwnerProfilePage(page: 'vehicles' | 'orders') {
+  ownerTab.value = 'profile'
+  ownerProfilePage.value = page
+  if (page === 'vehicles') {
+    swipedVehicleId.value = null
+  }
+  if (page !== 'orders') {
+    selectedOwnerOrderId.value = null
+  }
+}
+
+function openOwnerOrderDetail(recordId: number) {
+  selectedOwnerOrderId.value = recordId
+  ownerProfilePage.value = 'orderDetail'
+}
+
+function backFromOwnerSubpage() {
+  if (ownerProfilePage.value === 'orderDetail') {
+    ownerProfilePage.value = 'orders'
+    return
+  }
+  ownerProfilePage.value = 'menu'
+}
+
+function onVehicleSwipeStart(vehicleId: number, event: TouchEvent | MouseEvent) {
+  vehicleSwipeId.value = vehicleId
+  swipedVehicleId.value = swipedVehicleId.value === vehicleId ? vehicleId : null
+  if ('touches' in event) {
+    vehicleSwipeStartX.value = event.touches[0]?.clientX ?? 0
+    return
+  }
+  vehicleSwipeStartX.value = event.clientX
+}
+
+function onVehicleSwipeEnd(vehicleId: number, event: TouchEvent | MouseEvent) {
+  if (vehicleSwipeId.value !== vehicleId) {
+    return
+  }
+  let endX = 0
+  if ('changedTouches' in event) {
+    endX = event.changedTouches[0]?.clientX ?? vehicleSwipeStartX.value
+  } else {
+    endX = event.clientX
+  }
+  const deltaX = endX - vehicleSwipeStartX.value
+  if (deltaX < -38) {
+    swipedVehicleId.value = vehicleId
+  } else if (deltaX > 24) {
+    swipedVehicleId.value = null
+  }
+  vehicleSwipeId.value = null
+}
+
+function formatDurationMinutes(minutes: number) {
+  const safeMinutes = Math.max(0, Math.round(minutes))
+  const hours = Math.floor(safeMinutes / 60)
+  const remainingMinutes = safeMinutes % 60
+  return hours > 0 ? `${hours}小时${remainingMinutes}分钟` : `${remainingMinutes}分钟`
 }
 
 function deleteRecord(recordId: number) {
@@ -338,10 +514,73 @@ function deleteRecord(recordId: number) {
 }
 
 function editRecord(recordId: number) {
-  banner.value = `记录 ${recordId} 已进入编辑模式（答辩演示版）。`
+  const record = dataset.value?.records.find((item) => item.id === recordId)
+  if (!record) {
+    banner.value = '停车记录不存在。'
+    return
+  }
+  const currentOrder = orderMap.value.get(recordId)
+  editingRecordId.value = recordId
+  recordEditForm.entryTime = record.entryTime
+  recordEditForm.exitTime = record.exitTime ?? ''
+  recordEditForm.amount = currentOrder?.amount ?? record.amount
+  recordEditForm.paymentStatus = currentOrder?.paymentStatus ?? '已支付'
+  banner.value = `正在编辑记录 ${recordId}。`
+}
+
+function cancelRecordEdit() {
+  editingRecordId.value = null
+  recordEditForm.entryTime = ''
+  recordEditForm.exitTime = ''
+  recordEditForm.amount = 0
+  recordEditForm.paymentStatus = '已支付'
+}
+
+async function saveRecordEdit() {
+  if (editingRecordId.value === null) {
+    return
+  }
+  try {
+    await api.updateRecord(editingRecordId.value, {
+      entryTime: recordEditForm.entryTime,
+      exitTime: recordEditForm.exitTime,
+      amount: Number(recordEditForm.amount),
+      paymentStatus: recordEditForm.paymentStatus,
+    })
+    await refresh()
+    banner.value = `记录 ${editingRecordId.value} 已更新。`
+    cancelRecordEdit()
+  } catch (error) {
+    banner.value = error instanceof Error ? error.message : '停车记录更新失败'
+  }
+}
+
+function ownerPageTitle() {
+  if (ownerTab.value === 'profile') {
+    if (ownerProfilePage.value === 'vehicles') return '车辆信息'
+    if (ownerProfilePage.value === 'orders') return '我的订单'
+    if (ownerProfilePage.value === 'orderDetail') return '订单详情'
+    return '我的'
+  }
+  return ownerTab.value === 'home' ? '城市停车' : ownerTab.value === 'parking' ? '停车查询' : '停车缴费'
 }
 
 onMounted(loadPage)
+
+watch(ownerTab, async (tab) => {
+  if (tab === 'parking') {
+    await refresh()
+  }
+})
+
+watch(selectedParkingCity, () => {
+  parkingCityMenuOpen.value = false
+})
+
+function exitParkingSearch() {
+  parkingSearchActive.value = false
+  parkingSearchKeyword.value = ''
+}
 </script>
 
 <template>
@@ -402,147 +641,412 @@ onMounted(loadPage)
     </section>
   </div>
 
-  <div v-else-if="dataset" class="page-shell" :class="{ 'owner-mobile-shell': isOwnerMobileView }">
-    <header class="hero">
-      <div class="hero-copy">
-        <span class="eyebrow">{{ isOwnerMobileView ? 'Owner Service Portal' : 'Admin Control Center' }}</span>
-        <h1>{{ isOwnerMobileView ? '车主服务端' : '系统管理员后台' }}</h1>
-        <span class="hero-user-chip">{{ currentUser?.realName }} / {{ currentUser?.role }}</span>
-        <div class="hero-actions">
-          <template v-if="isOwnerMobileView">
-            <button
-              v-for="item in ownerNav"
-              :key="item.key"
-              class="pill"
-              :class="{ active: ownerTab === item.key }"
-              @click="ownerTab = item.key"
-            >
-              {{ item.label }}
-            </button>
-          </template>
-          <template v-else>
-            <button
-              v-for="item in adminNav"
-              :key="item.key"
-              class="pill"
-              :class="{ active: adminTab === item.key }"
-              @click="adminTab = item.key"
-            >
-              {{ item.label }}
-            </button>
-          </template>
-          <button class="pill logout-pill" @click="logout">退出登录</button>
-        </div>
-      </div>
-    </header>
-
-    <section v-if="isOwnerMobileView" class="section">
-      <article v-if="ownerTab === 'home'" class="panel owner-mobile-panel">
-        <div class="panel-header">
-          <h2>车主功能入口</h2>
-        </div>
-        <div class="entry-grid">
-          <button class="entry-card" @click="ownerTab = 'query'">
-            <strong>停车查询</strong>
-            <span>查看停车场与收费规则</span>
-          </button>
-          <button class="entry-card" @click="ownerTab = 'vehicles'">
-            <strong>车辆管理</strong>
-            <span>新增和维护车辆信息</span>
-          </button>
-          <button class="entry-card" @click="ownerTab = 'payment'">
-            <strong>停车缴费</strong>
-            <span>处理在场车辆的缴费</span>
-          </button>
-          <button class="entry-card" @click="ownerTab = 'orders'">
-            <strong>订单查看</strong>
-            <span>查看已支付和未支付订单</span>
+  <div v-else-if="dataset && isOwnerMobileView" class="page-shell owner-mobile-shell">
+    <div class="mobile-app-frame">
+      <header
+        v-if="ownerTab !== 'profile' || ownerProfilePage !== 'menu'"
+        class="mobile-header mobile-header-floating"
+      >
+        <div class="mobile-header-floating-side">
+          <button
+            v-if="ownerTab === 'profile' && ownerProfilePage !== 'menu'"
+            class="ghost-button owner-floating-back-button"
+            @click="backFromOwnerSubpage"
+          >
+            ‹
           </button>
         </div>
-      </article>
-
-      <article v-if="ownerTab === 'query'" class="panel owner-mobile-panel">
-        <div class="panel-header">
-          <h2>停车查询</h2>
-          <span>查看停车场基础信息与收费规则</span>
-        </div>
-        <div class="notice-list">
-          <div v-for="lot in dataset.parkingLots" :key="lot.id" class="notice-card">
-            <div class="notice-title">
-              <strong>{{ lot.name }}</strong>
-              <span class="badge success">空闲 {{ lot.freeSpaces }} / {{ lot.totalSpaces }}</span>
-            </div>
-            <p>{{ lot.address }}</p>
-            <p>营业时间：{{ lot.businessHours }}</p>
-            <p>{{ lotPricingMap.get(lot.id) ?? '按停车场规则计费' }}</p>
+        <div class="mobile-header-floating-center">
+          <div class="mobile-header-floating-bar">
+            <h1>{{ ownerPageTitle() }}</h1>
           </div>
         </div>
-      </article>
-
-      <article v-if="ownerTab === 'vehicles'" class="panel owner-mobile-panel">
-        <div class="panel-header">
-          <h2>车辆管理</h2>
-          <span>绑定和维护车主车辆</span>
+        <div class="mobile-header-floating-side mobile-header-floating-side-end">
+          <button
+            v-if="ownerTab === 'profile' && ownerProfilePage === 'vehicles'"
+            class="ghost-button owner-floating-back-button owner-floating-add-button"
+            @click="vehicleFormVisible = !vehicleFormVisible"
+          >
+            ＋
+          </button>
         </div>
-        <form class="compact-form owner-checkin-form" @submit.prevent="addVehicle">
-          <select v-model.number="vehicleForm.userId">
-            <option v-for="user in ownerUsers" :key="user.id" :value="user.id">
-              {{ user.realName }}
-            </option>
-          </select>
-          <input v-model="vehicleForm.plateNumber" placeholder="车牌号" />
-          <input v-model="vehicleForm.brand" placeholder="品牌" />
-          <input v-model="vehicleForm.color" placeholder="颜色" />
-          <button type="submit">绑定车辆</button>
-        </form>
-        <div class="vehicle-grid">
-          <div v-for="vehicle in ownerVehicles" :key="vehicle.id" class="vehicle-card">
-            <strong>{{ vehicle.plateNumber }}</strong>
-            <span>{{ vehicle.brand }} / {{ vehicle.color }}</span>
-            <p>{{ vehicle.ownerName }}</p>
-            <button class="ghost-button inline-ghost" @click="removeVehicle(vehicle.id)">删除车辆</button>
+      </header>
+
+      <div v-if="ownerTab === 'parking'" class="parking-search-floating">
+        <div class="parking-search-bar" :class="{ 'parking-search-bar-active': parkingSearchActive }">
+          <div class="parking-city-dropdown" :class="{ 'parking-search-hidden': parkingSearchActive }">
+            <button class="parking-city-trigger" @click="parkingCityMenuOpen = !parkingCityMenuOpen">
+              <span>{{ selectedParkingCity || '选择城市' }}</span>
+            </button>
+            <div v-if="parkingCityMenuOpen" class="parking-city-menu">
+              <button
+                v-for="city in ownerParkingCities"
+                :key="city"
+                class="parking-city-option"
+                :class="{ active: selectedParkingCity === city }"
+                @click="selectedParkingCity = city"
+              >
+                {{ city }}
+              </button>
+            </div>
+          </div>
+          <div class="parking-search-input-shell">
+            <input
+              v-model="parkingSearchKeyword"
+              placeholder=""
+              @focus="parkingSearchActive = true"
+              @keydown.enter.prevent
+            />
+          </div>
+          <button class="owner-primary-button parking-search-button" :class="{ 'parking-search-hidden': parkingSearchActive }">搜索</button>
+          <button class="parking-search-close" :class="{ 'parking-search-close-visible': parkingSearchActive }" @click="exitParkingSearch">✕</button>
+        </div>
+      </div>
+
+      <Transition name="vehicle-sheet">
+        <div
+          v-if="ownerTab === 'profile' && ownerProfilePage === 'vehicles' && vehicleFormVisible"
+          class="vehicle-sheet-overlay"
+        >
+          <div class="vehicle-sheet-backdrop" @click="vehicleFormVisible = false" />
+          <section class="vehicle-sheet-panel">
+            <header class="vehicle-sheet-header">
+              <button
+                type="button"
+                class="ghost-button owner-floating-back-button vehicle-sheet-header-button"
+                @click="vehicleFormVisible = false"
+              >
+                ‹
+              </button>
+              <h2>车辆信息</h2>
+              <button
+                type="submit"
+                form="vehicle-sheet-form"
+                class="ghost-button owner-floating-back-button vehicle-sheet-header-button vehicle-sheet-confirm-button"
+              >
+                ✓
+              </button>
+            </header>
+            <form
+              id="vehicle-sheet-form"
+              class="compact-form owner-checkin-form vehicle-inline-form vehicle-sheet-form"
+              @submit.prevent="addVehicle"
+            >
+              <input v-model="vehicleForm.plateNumber" placeholder="车牌号" />
+              <input v-model="vehicleForm.brand" placeholder="品牌" />
+              <input v-model="vehicleForm.color" placeholder="颜色" />
+            </form>
+          </section>
+        </div>
+      </Transition>
+
+      <section :class="['mobile-content', { 'mobile-content-with-header': ownerTab !== 'profile' || ownerProfilePage !== 'menu', 'mobile-content-with-parking-search': ownerTab === 'parking' }]">
+        <article v-if="ownerTab === 'home'" class="owner-home-page">
+          <section class="owner-hero-card">
+            <div class="owner-hero-illustration">P</div>
+            <template v-if="ownerParkingOverview.count > 0">
+              <span class="owner-hero-eyebrow">当前停车概览</span>
+              <strong>当前有 {{ ownerParkingOverview.count }} 辆车在场</strong>
+              <div class="owner-hero-live-grid">
+                <div class="owner-hero-live-card">
+                  <span>待处理车辆</span>
+                  <strong>{{ ownerParkingOverview.count }} 辆</strong>
+                </div>
+                <div class="owner-hero-live-card">
+                  <span>当前总费用</span>
+                  <strong>{{ ownerParkingOverview.totalAmount }}</strong>
+                </div>
+              </div>
+              <div class="owner-hero-parking-list">
+                <div v-for="item in ownerParkingOverview.items" :key="item.id" class="owner-hero-parking-item">
+                  <div>
+                    <strong>{{ item.plateNumber }}</strong>
+                    <p>{{ item.parkingLotName }}</p>
+                  </div>
+                  <div class="owner-hero-parking-meta">
+                    <span>{{ item.durationText }}</span>
+                    <strong>{{ item.amountText }}</strong>
+                  </div>
+                </div>
+                <p v-if="ownerParkingOverview.hiddenCount > 0" class="owner-hero-more-text">
+                  还有 {{ ownerParkingOverview.hiddenCount }} 辆车辆在场
+                </p>
+              </div>
+              <button class="owner-primary-button" @click="ownerTab = 'payment'">去处理待缴费</button>
+            </template>
+            <template v-else>
+              <span class="owner-hero-eyebrow">车主服务</span>
+              <strong>{{ ownerVehicles.length > 0 ? '当前没有车辆在场' : '添加车牌，缴费更快捷' }}</strong>
+              <p>{{ ownerVehicles.length > 0 ? '可直接查看停车场、历史订单和待缴记录。' : '支持停车查询、待缴费处理和订单查看，减少排队等待。' }}</p>
+              <button class="owner-primary-button" @click="ownerVehicles.length > 0 ? ownerTab = 'parking' : openOwnerProfilePage('vehicles')">
+                {{ ownerVehicles.length > 0 ? '去停车查询' : '去添加车辆' }}
+              </button>
+            </template>
+            <div class="owner-quick-grid">
+              <button class="owner-quick-item" @click="ownerTab = 'parking'">
+                <span>位</span>
+                <strong>找车位</strong>
+              </button>
+              <button class="owner-quick-item" @click="openOwnerProfilePage('vehicles')">
+                <span>车</span>
+                <strong>我的车辆</strong>
+              </button>
+              <button class="owner-quick-item" @click="openOwnerProfilePage('orders')">
+                <span>单</span>
+                <strong>查订单</strong>
+              </button>
+              <button class="owner-quick-item" @click="ownerTab = 'payment'">
+                <span>缴</span>
+                <strong>停车缴费</strong>
+              </button>
+            </div>
+          </section>
+
+          <section class="owner-message-strip">
+            <strong>最近消息</strong>
+            <span>{{ ownerLatestOrder ? `${ownerLatestOrder.plateNumber} 最近一笔订单 ${ownerLatestOrder.paymentStatus}` : '登录后查看最新停车消息' }}</span>
+          </section>
+
+          <section class="owner-benefit-grid">
+            <article class="owner-benefit-card owner-benefit-card-large">
+              <span>已绑定车辆</span>
+              <strong>{{ ownerVehicles.length }}</strong>
+              <p>已录入系统的车辆信息</p>
+            </article>
+            <article class="owner-benefit-card">
+              <span>待处理缴费</span>
+              <strong>{{ ownerPendingPayments.length }}</strong>
+              <p>可在“缴费”中立即处理</p>
+            </article>
+            <article class="owner-benefit-card">
+              <span>最近订单</span>
+              <strong>{{ ownerLatestOrder?.amount ?? 0 }} 元</strong>
+              <p>{{ ownerLatestOrder?.parkingLotName ?? '暂无订单记录' }}</p>
+            </article>
+          </section>
+        </article>
+
+      <article v-if="ownerTab === 'parking'" class="panel owner-mobile-panel">
+        <div class="parking-filter-row">
+          <button
+            class="parking-filter-chip"
+            :class="{ active: ownerParkingFilter === '全部' }"
+            @click="ownerParkingFilter = '全部'"
+          >
+            全部
+          </button>
+          <button
+            class="parking-filter-chip"
+            :class="{ active: ownerParkingFilter === '空位优先' }"
+            @click="ownerParkingFilter = '空位优先'"
+          >
+            空位优先
+          </button>
+          <button
+            class="parking-filter-chip"
+            :class="{ active: ownerParkingFilter === '全天开放' }"
+            @click="ownerParkingFilter = '全天开放'"
+          >
+            全天开放
+          </button>
+        </div>
+
+        <div class="parking-lot-list">
+          <div v-for="lot in ownerParkingLots" :key="lot.id" class="parking-lot-card">
+            <div class="parking-lot-top">
+              <div class="parking-lot-thumb">{{ lot.name.slice(0, 2) }}</div>
+              <div class="parking-lot-headline">
+                <strong>{{ lot.name }}</strong>
+                <span class="parking-status-chip">空闲 {{ lot.freeSpaces }}/{{ lot.totalSpaces }}</span>
+              </div>
+            </div>
+            <div class="parking-lot-bottom">
+              <p class="parking-lot-address">{{ lot.address }}</p>
+              <p class="parking-lot-meta">营业时间：{{ lot.businessHours }}</p>
+              <p class="parking-lot-meta">收费规则：{{ lotPricingMap.get(lot.id) ?? '按停车场规则计费' }}</p>
+            </div>
+          </div>
+          <div v-if="ownerParkingLots.length === 0" class="notice-card">
+            <strong>暂无匹配停车场</strong>
+            <p>请更换关键词或筛选条件后重试。</p>
           </div>
         </div>
       </article>
 
       <article v-if="ownerTab === 'payment'" class="panel owner-mobile-panel">
         <div class="panel-header">
-          <h2>停车缴费</h2>
           <span>只保留待支付停车记录</span>
         </div>
         <div class="active-records">
-          <div v-for="record in ownerPendingPayments" :key="record.id" class="active-card">
+          <div v-for="record in ownerPendingPayments" :key="record.id" class="payment-record-card">
+            <div class="payment-record-top">
+              <div class="payment-record-status">待缴</div>
+              <div class="payment-record-main">
+                <strong>{{ record.plateNumber }}</strong>
+                <span>{{ record.parkingLotName }}</span>
+              </div>
+              <div class="payment-record-amount">
+                <strong>{{ record.amount }}元</strong>
+              </div>
+            </div>
+            <div class="payment-record-bottom">
+              <p>入场时间：{{ record.entryTime }}</p>
+              <p>当前状态：在场</p>
+            </div>
+            <button class="ghost-button payment-record-action" @click="checkOutVehicle(record.id)">结束停车并生成订单</button>
+          </div>
+        </div>
+      </article>
+
+        <article v-if="ownerTab === 'profile'" class="owner-profile-page">
+          <section v-if="ownerProfilePage === 'menu'" class="owner-profile-hero">
+            <div class="owner-avatar">车</div>
             <div>
-              <strong>{{ record.plateNumber }} / {{ record.parkingLotName }}</strong>
-              <span>入场时间：{{ record.entryTime }}</span>
-              <span>当前状态：在场，待支付</span>
+              <strong>{{ currentUser?.realName }}</strong>
+              <p>{{ currentUser?.phone }}</p>
             </div>
-            <button class="ghost-button" @click="checkOutVehicle(record.id)">支付停车费用</button>
-          </div>
-        </div>
-      </article>
+          </section>
 
-      <article v-if="ownerTab === 'orders'" class="panel owner-mobile-panel">
-        <div class="panel-header">
-          <h2>订单查看</h2>
-          <span>查看已支付和未支付订单</span>
-        </div>
-        <div class="notice-list">
-          <div v-for="order in ownerOrderRows" :key="order.recordId" class="notice-card">
-            <div class="notice-title">
-              <strong>{{ order.plateNumber }}</strong>
-              <span class="badge" :class="order.paymentStatus === '已支付' ? 'success' : 'warning'">{{ order.paymentStatus }}</span>
+          <section v-if="ownerProfilePage === 'menu'" class="owner-profile-stats">
+            <div>
+              <strong>{{ ownerVehicles.length }}</strong>
+              <span>我的车辆</span>
             </div>
-            <p>{{ order.parkingLotName }}</p>
-            <p>支付金额：{{ order.amount }} 元</p>
-            <p>出场时间：{{ orderRecordMap.get(order.recordId) ?? '待出场' }}</p>
-            <p>支付时间：{{ order.createdAt }}</p>
-          </div>
-        </div>
-      </article>
-    </section>
+            <div>
+              <strong>{{ ownerOrderRows.length }}</strong>
+              <span>停车订单</span>
+            </div>
+            <div>
+              <strong>{{ ownerPendingPayments.length }}</strong>
+              <span>待缴记录</span>
+            </div>
+          </section>
 
-    <section v-else class="section">
+          <section v-if="ownerProfilePage === 'menu'" class="owner-group-card">
+            <h3>交易管理</h3>
+            <div class="owner-tool-grid">
+              <button class="owner-tool-item" @click="openOwnerProfilePage('vehicles')">
+                <span>车</span>
+                <strong>车辆信息</strong>
+              </button>
+              <button class="owner-tool-item" @click="openOwnerProfilePage('orders')">
+                <span>缴</span>
+                <strong>我的订单</strong>
+              </button>
+            </div>
+          </section>
+
+          <section v-if="ownerProfilePage === 'vehicles'" class="owner-group-card owner-group-card-plain">
+            <div class="vehicle-overview vehicle-overview-full">
+              <div
+                v-for="vehicle in ownerVehicles"
+                :key="vehicle.id"
+                class="vehicle-swipe-row"
+                :class="{ 'vehicle-swipe-row-open': swipedVehicleId === vehicle.id }"
+              >
+                <button class="vehicle-delete-reveal" @click="removeVehicle(vehicle.id)">🗑</button>
+                <div
+                  class="owner-detail-card owner-detail-card-vehicle vehicle-swipe-card"
+                  @touchstart.passive="onVehicleSwipeStart(vehicle.id, $event)"
+                  @touchend="onVehicleSwipeEnd(vehicle.id, $event)"
+                  @mousedown="onVehicleSwipeStart(vehicle.id, $event)"
+                  @mouseup="onVehicleSwipeEnd(vehicle.id, $event)"
+                  @mouseleave="onVehicleSwipeEnd(vehicle.id, $event)"
+                  @click="swipedVehicleId = swipedVehicleId === vehicle.id ? null : swipedVehicleId"
+                >
+                  <div class="owner-detail-thumb">{{ vehicle.plateNumber.slice(0, 1) }}</div>
+                  <div class="owner-detail-main">
+                    <div class="owner-detail-title-row">
+                      <strong>{{ vehicle.plateNumber }}</strong>
+                      <span class="parking-distance-text">{{ vehicle.status }}</span>
+                    </div>
+                    <p>{{ vehicle.brand }} / {{ vehicle.color }}</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section v-if="ownerProfilePage === 'orders'" class="owner-group-card owner-group-card-plain">
+            <div class="notice-list vehicle-overview-full">
+              <div v-for="order in ownerOrderRows" :key="order.recordId" class="owner-detail-card owner-detail-card-vehicle">
+                <div class="owner-detail-thumb">单</div>
+                <div class="owner-detail-main">
+                  <div class="owner-detail-title-row">
+                    <strong>{{ order.plateNumber }}</strong>
+                    <span class="badge" :class="order.paymentStatus === '已支付' ? 'success' : 'warning'">{{ order.paymentStatus }}</span>
+                  </div>
+                  <p>{{ order.parkingLotName }}</p>
+                  <button class="ghost-button inline-ghost" @click="openOwnerOrderDetail(order.recordId)">查看详情</button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section v-if="ownerProfilePage === 'orderDetail' && selectedOwnerOrder" class="owner-group-card">
+            <div class="owner-order-detail-card">
+              <div class="owner-detail-title-row">
+                <strong>{{ selectedOwnerOrder.plateNumber }}</strong>
+                <span class="badge" :class="selectedOwnerOrder.paymentStatus === '已支付' ? 'success' : 'warning'">
+                  {{ selectedOwnerOrder.paymentStatus }}
+                </span>
+              </div>
+              <p>车牌号：{{ selectedOwnerOrder.plateNumber }}</p>
+              <p>停车场：{{ selectedOwnerOrder.parkingLotName }}</p>
+              <p>支付金额：{{ selectedOwnerOrder.amount }} 元</p>
+              <p>出场时间：{{ orderRecordMap.get(selectedOwnerOrder.recordId) ?? '待出场' }}</p>
+              <p>{{ selectedOwnerOrder.paymentStatus === '已支付' ? '支付时间' : '订单生成时间' }}：{{ selectedOwnerOrder.createdAt }}</p>
+              <button
+                v-if="selectedOwnerOrder.paymentStatus !== '已支付'"
+                class="owner-primary-button"
+                @click="payOwnerOrder(selectedOwnerOrder.recordId)"
+              >
+                确认支付
+              </button>
+            </div>
+          </section>
+
+          <button v-if="ownerProfilePage === 'menu'" class="ghost-button profile-logout-button" @click="logout">退出登录</button>
+        </article>
+      </section>
+
+      <nav class="mobile-tabbar">
+        <button
+          v-for="item in ownerNav"
+          :key="item.key"
+          class="mobile-tab"
+          :class="{ active: ownerTab === item.key }"
+          @click="selectOwnerTab(item.key)"
+        >
+          <span class="mobile-tab-icon">{{ item.key === 'home' ? '首' : item.key === 'parking' ? '停' : item.key === 'payment' ? '缴' : '我' }}</span>
+          <span>{{ item.label }}</span>
+        </button>
+      </nav>
+    </div>
+  </div>
+
+  <div v-else-if="dataset" class="page-shell">
+    <header class="hero">
+      <div class="hero-copy">
+        <span class="eyebrow">Admin Control Center</span>
+        <h1>系统管理员后台</h1>
+        <span class="hero-user-chip">{{ currentUser?.realName }} / {{ currentUser?.role }}</span>
+        <div class="hero-actions">
+          <button
+            v-for="item in adminNav"
+            :key="item.key"
+            class="pill"
+            :class="{ active: adminTab === item.key }"
+            @click="adminTab = item.key"
+          >
+            {{ item.label }}
+          </button>
+          <button class="pill logout-pill" @click="logout">退出登录</button>
+        </div>
+      </div>
+    </header>
+
+    <section class="section">
       <article v-if="adminTab === 'income'" class="panel">
         <div class="panel-header">
           <h2>收入统计</h2>
@@ -605,6 +1109,17 @@ onMounted(loadPage)
             </tbody>
           </table>
         </div>
+        <form v-if="editingRecordId !== null" class="record-edit-panel compact-form" @submit.prevent="saveRecordEdit">
+          <input v-model="recordEditForm.entryTime" placeholder="入场时间：2026-03-24 11:02:26" />
+          <input v-model="recordEditForm.exitTime" placeholder="出场时间：为空表示仍在场" />
+          <input v-model.number="recordEditForm.amount" type="number" min="0" step="0.01" placeholder="费用" />
+          <select v-model="recordEditForm.paymentStatus">
+            <option value="已支付">已支付</option>
+            <option value="未支付">未支付</option>
+          </select>
+          <button type="submit">保存编辑</button>
+          <button type="button" class="ghost-button danger-ghost" @click="cancelRecordEdit">取消编辑</button>
+        </form>
       </article>
 
       <div v-if="adminTab === 'dashboard'" class="dual-grid">
