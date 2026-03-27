@@ -1,3 +1,5 @@
+SET NAMES utf8mb4;
+
 CREATE DATABASE IF NOT EXISTS city_parking_resource_management DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE city_parking_resource_management;
 

@@ -1,3 +1,5 @@
+SET NAMES utf8mb4;
+
 USE city_parking_resource_management;
 
 INSERT INTO sys_role (id, role_code, role_name, description) VALUES
@@ -209,7 +211,7 @@ SET occupied_spaces = (
     );
 
 INSERT INTO sys_notice (id, title, content, level_name) VALUES
-(1, '毕业设计演示账号说明', '车主登录账号：owner / 123456，管理员通过首页“进入后台管理”按钮进入。', '重要'),
+(1, '毕业设计演示账号说明', '车主登录账号：owner / 123456，管理员通过首页"进入后台管理"按钮进入。', '重要'),
 (2, '系统演示范围', '支持停车资源管理、车辆进出场、订单结算、数据看板、调度建议等核心流程。', '普通');
 
 INSERT INTO sys_operation_log (id, action_name, detail_text, created_at) VALUES
