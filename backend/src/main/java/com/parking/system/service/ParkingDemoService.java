@@ -30,7 +30,7 @@ public class ParkingDemoService {
     private final AtomicLong userId = new AtomicLong(3);
     private final AtomicLong vehicleId = new AtomicLong(4);
     private final AtomicLong parkingLotId = new AtomicLong(10);
-    private final AtomicLong recordId = new AtomicLong(22);
+    private final AtomicLong recordId = new AtomicLong(23);
     private final AtomicLong orderId = new AtomicLong(10);
     private final AtomicLong logId = new AtomicLong(3);
 
@@ -279,11 +279,11 @@ public class ParkingDemoService {
         order.put("plateNumber", record.get("plateNumber"));
         order.put("parkingLotName", record.get("parkingLotName"));
         order.put("amount", amount);
-        order.put("paymentStatus", "已支付");
+        order.put("paymentStatus", "未支付");
         order.put("createdAt", record.get("exitTime"));
         orders.add(order);
 
-        appendLog("车辆出场", record.get("plateNumber") + " 离开 " + record.get("parkingLotName") + "，费用 " + amount + " 元");
+        appendLog("车辆出场", record.get("plateNumber") + " 离开 " + record.get("parkingLotName") + "，待支付 " + amount + " 元");
         refreshParkingLotMetrics();
         return Map.of("record", decorateRecordForResponse(record), "order", order);
     }
@@ -292,6 +292,10 @@ public class ParkingDemoService {
         Map<String, Object> record = getById(parkingRecords, currentRecordId, "停车记录不存在");
         LocalDateTime entryTime = LocalDateTime.parse(request.entryTime(), FORMATTER);
         String exitTimeText = request.exitTime() == null ? "" : request.exitTime().trim();
+        spaces.stream()
+                .filter(item -> item.get("code").equals(record.get("spaceCode")))
+                .findFirst()
+                .ifPresent(item -> item.put("status", exitTimeText.isEmpty() ? "占用" : "空闲"));
 
         record.put("entryTime", FORMATTER.format(entryTime));
         if (exitTimeText.isEmpty()) {
@@ -331,7 +335,21 @@ public class ParkingDemoService {
         }
 
         appendLog("编辑停车记录", record.get("plateNumber") + " 的停车记录已更新");
+        refreshParkingLotMetrics();
         return decorateRecordForResponse(record);
+    }
+
+    public synchronized Map<String, Object> payOrder(Long currentRecordId) {
+        Map<String, Object> record = getById(parkingRecords, currentRecordId, "停车记录不存在");
+        Map<String, Object> order = orders.stream()
+                .filter(item -> item.get("recordId").equals(currentRecordId))
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("订单不存在"));
+
+        order.put("paymentStatus", "已支付");
+        order.put("createdAt", FORMATTER.format(LocalDateTime.now()));
+        appendLog("订单支付", record.get("plateNumber") + " 完成支付，订单 " + order.get("id"));
+        return order;
     }
 
     public synchronized Map<String, Object> dashboardOverview() {
@@ -550,6 +568,8 @@ public class ParkingDemoService {
                 LocalDateTime.now().minusMinutes(28), null, 0, BigDecimal.ZERO, "在场"));
         parkingRecords.add(record(22L, 1L, "沪A12345", "张晓彤", 6L, "杭州钱江新城停车中心", "PD-006-A-002",
                 LocalDateTime.now().minusMinutes(18), null, 0, BigDecimal.ZERO, "在场"));
+        parkingRecords.add(record(23L, 2L, "沪B66218", "张晓彤", 6L, "杭州钱江新城停车中心", "PD-006-A-001",
+                LocalDateTime.now().minusMinutes(60), null, 0, BigDecimal.ZERO, "在场"));
 
         orders.add(order(2L, 5L, "沪A12345", "滨江商务停车中心", "8", LocalDateTime.now().minusDays(1).minusHours(3)));
         orders.add(order(3L, 6L, "沪A12345", "静安嘉里地下停车库", "18", LocalDateTime.now().minusDays(2).minusHours(4)));

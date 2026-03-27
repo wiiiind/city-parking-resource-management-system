@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { api } from './services/api'
 import type { AppDataset, LoginPayload, Order, ParkingLotPayload, RecordUpdatePayload, RegisterPayload, User, VehiclePayload } from './types'
 
@@ -26,6 +26,7 @@ const selectedLotId = ref(1)
 const adminRecordKeyword = ref('')
 const editingRecordId = ref<number | null>(null)
 const selectedOwnerOrderId = ref<number | null>(null)
+const recordEditPanelRef = ref<HTMLElement | null>(null)
 
 const loginForm = reactive<LoginPayload>({
   username: 'owner',
@@ -224,16 +225,25 @@ const lotDashboardRecords = computed(() => {
     return sameLot && matchCategory
   })
 })
-const occupiedVehicleRows = computed(() =>
-  lotDashboardRecords.value
-    .filter((record) => record.status === '在场')
-    .map((record) => ({
-      plateNumber: record.plateNumber,
-      ownerName: record.ownerName,
-      spaceCode: record.spaceCode,
-      entryTime: record.entryTime,
-    })),
-)
+const occupiedVehicleRows = computed(() => {
+  const activeRecordMap = new Map(
+    lotDashboardRecords.value
+      .filter((record) => record.status === '在场')
+      .map((record) => [record.spaceCode, record]),
+  )
+
+  return lotDashboardSpaces.value
+    .filter((space) => space.status === '占用')
+    .map((space) => {
+      const record = activeRecordMap.get(space.code)
+      return {
+        plateNumber: record?.plateNumber ?? '待同步',
+        ownerName: record?.ownerName ?? '待同步',
+        spaceCode: space.code,
+        entryTime: record?.entryTime ?? '-',
+      }
+    })
+})
 const lotDashboardMetrics = computed(() => {
   if (!selectedLot.value) {
     return []
@@ -526,6 +536,9 @@ function editRecord(recordId: number) {
   recordEditForm.amount = currentOrder?.amount ?? record.amount
   recordEditForm.paymentStatus = currentOrder?.paymentStatus ?? '已支付'
   banner.value = `正在编辑记录 ${recordId}。`
+  nextTick(() => {
+    recordEditPanelRef.value?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  })
 }
 
 function cancelRecordEdit() {
@@ -1109,7 +1122,7 @@ function exitParkingSearch() {
             </tbody>
           </table>
         </div>
-        <form v-if="editingRecordId !== null" class="record-edit-panel compact-form" @submit.prevent="saveRecordEdit">
+        <form v-if="editingRecordId !== null" ref="recordEditPanelRef" class="record-edit-panel compact-form" @submit.prevent="saveRecordEdit">
           <input v-model="recordEditForm.entryTime" placeholder="入场时间：2026-03-24 11:02:26" />
           <input v-model="recordEditForm.exitTime" placeholder="出场时间：为空表示仍在场" />
           <input v-model.number="recordEditForm.amount" type="number" min="0" step="0.01" placeholder="费用" />

@@ -44,6 +44,11 @@ public class RecordController {
         return ApiResponse.ok("车辆出场成功", parkingDemoService.checkOut(request.recordId()));
     }
 
+    @PostMapping("/orders/pay")
+    public ApiResponse<?> payOrder(@Valid @RequestBody CheckOutRequest request) {
+        return ApiResponse.ok("订单支付成功", parkingDemoService.payOrder(request.recordId()));
+    }
+
     @PutMapping("/{recordId}")
     public ApiResponse<?> updateRecord(@PathVariable Long recordId, @Valid @RequestBody RecordUpdateRequest request) {
         return ApiResponse.ok("停车记录更新成功", parkingDemoService.updateRecord(recordId, request));

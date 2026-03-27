@@ -970,7 +970,7 @@ button {
     max-width 220ms ease,
     margin 220ms ease;
   max-width: 140px;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .parking-city-trigger {
