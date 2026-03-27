@@ -108,18 +108,28 @@ cd backend
 
 数据库脚本位于：
 
+- `sql/bootstrap.sql`
 - `sql/schema.sql`
 - `sql/data.sql`
 
-导入顺序：
+推荐初始化方式：
 
-1. 执行 `schema.sql`
-2. 执行 `data.sql`
+```bash
+sudo mysql < sql/bootstrap.sql
+```
+
+`bootstrap.sql` 会完成以下工作：
+
+1. 创建数据库 `city_parking_resource_management`
+2. 创建应用账号 `city_parking_app`
+3. 授权应用账号访问数据库
+4. 执行 `schema.sql` 建表
+5. 执行 `data.sql` 导入演示数据
 
 说明：
 
-- 当前后端为了保证答辩演示稳定，默认使用内置演示数据层即可直接运行
-- SQL 已同步提供，便于论文、数据库设计和后续扩展接入 MySQL
+- 当前后端已接入真实 MySQL 数据库运行
+- SQL 可一键初始化同款数据库环境，便于答辩演示和项目复现
 
 ## 当前已验证
 
